@@ -10,6 +10,11 @@ export interface ProgressState {
   projectStatuses: Record<string, string>
   startDate: string | null
   lightMode: boolean
+  kanbanColumns: {
+    todo: string[]
+    inProgress: string[]
+    done: string[]
+  }
 }
 
 function defaultState(): ProgressState {
@@ -20,6 +25,7 @@ function defaultState(): ProgressState {
     projectStatuses: {},
     startDate: null,
     lightMode: false,
+    kanbanColumns: { todo: [], inProgress: [], done: [] },
   }
 }
 
@@ -131,4 +137,41 @@ export function importProgress(json: string): ProgressState {
 
 export function resetProgress(): ProgressState {
   return defaultState()
+}
+
+export function moveKanbanTask(
+  state: ProgressState,
+  taskId: string,
+  fromColumn: keyof Pick<ProgressState['kanbanColumns'], 'todo' | 'inProgress' | 'done'>,
+  toColumn: keyof Pick<ProgressState['kanbanColumns'], 'todo' | 'inProgress' | 'done'>
+): ProgressState {
+  const cols = { ...state.kanbanColumns }
+  cols[fromColumn] = cols[fromColumn].filter(id => id !== taskId)
+  if (!cols[toColumn].includes(taskId)) {
+    cols[toColumn] = [...cols[toColumn], taskId]
+  }
+  return { ...state, kanbanColumns: cols }
+}
+
+export function addKanbanTask(
+  state: ProgressState,
+  taskId: string,
+  column: keyof Pick<ProgressState['kanbanColumns'], 'todo' | 'inProgress' | 'done'>
+): ProgressState {
+  const cols = { ...state.kanbanColumns }
+  if (!cols[column].includes(taskId)) {
+    cols[column] = [...cols[column], taskId]
+  }
+  return { ...state, kanbanColumns: cols }
+}
+
+export function removeKanbanTask(
+  state: ProgressState,
+  taskId: string
+): ProgressState {
+  const cols = { ...state.kanbanColumns }
+  for (const key of ['todo', 'inProgress', 'done'] as const) {
+    cols[key] = cols[key].filter(id => id !== taskId)
+  }
+  return { ...state, kanbanColumns: cols }
 }

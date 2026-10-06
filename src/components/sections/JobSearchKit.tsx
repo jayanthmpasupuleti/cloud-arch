@@ -3,12 +3,13 @@ import { Briefcase, FileText, MessageSquare, Flame, CheckCircle2, Circle } from 
 import { Card, CardBody } from '../primitives'
 import { roadmap } from '../../data/roadmap'
 import type { ProgressState } from '../../hooks/useProgress'
+import { LIGHT_THEME } from '../../theme/colors'
 
-const CATEGORY_META: Record<string, { icon: any; color: string; label: string }> = {
-  github: { icon: (_p: any) => null, color: 'from-slate-600 to-slate-500', label: 'GitHub' },
-  resume: { icon: FileText, color: 'from-blue-600 to-blue-500', label: 'Resume' },
-  linkedin: { icon: (_p: any) => null, color: 'from-sky-600 to-sky-500', label: 'LinkedIn' },
-  interview: { icon: MessageSquare, color: 'from-violet-600 to-violet-500', label: 'Interview' },
+const CATEGORY_META: Record<string, { Icon: any; color: string; label: string }> = {
+  github: { Icon: Briefcase, color: '#64748B', label: 'GitHub' },
+  resume: { Icon: FileText, color: '#3B82F6', label: 'Resume' },
+  linkedin: { Icon: MessageSquare, color: '#0EA5E9', label: 'LinkedIn' },
+  interview: { Icon: Flame, color: '#8B5CF6', label: 'Interview' },
 }
 
 export default function JobSearchKit({ state }: { state: ProgressState }) {
@@ -16,34 +17,33 @@ export default function JobSearchKit({ state }: { state: ProgressState }) {
 
   return (
     <section id="job-search">
-      <div className="mx-auto max-w-6xl px-4 py-16">
+      <div className="mx-auto max-w-6xl px-4 py-12">
         <div className="mb-10">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-400 text-white shadow-lg">
               <Briefcase className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-3xl font-bold text-white md:text-4xl">Job Search Kit</h2>
-              <p className="mt-1 text-slate-400">Start packaging in Month 3 — not after.</p>
+              <h2 className="text-3xl font-bold md:text-4xl" style={{ color: LIGHT_THEME.textPrimary }}>Job Search Kit</h2>
+              <p className="mt-1" style={{ color: LIGHT_THEME.textMuted }}>Start packaging in Month 3 — not after.</p>
             </div>
           </div>
         </div>
 
-        {/* Tip highlight */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           className="mb-8"
         >
-          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.04] p-5 md:p-6">
+          <div className="rounded-2xl border p-5 md:p-6" style={{ borderColor: 'rgba(16,185,129,0.2)', backgroundColor: 'rgba(16,185,129,0.04)' }}>
             <div className="flex items-start gap-4">
-              <div className="shrink-0 rounded-full bg-emerald-500/20 p-2">
-                <Flame className="h-5 w-5 text-emerald-400" />
+              <div className="shrink-0 rounded-full p-2" style={{ backgroundColor: 'rgba(16,185,129,0.12)' }}>
+                <Flame className="h-5 w-5 text-emerald-500" />
               </div>
               <div>
-                <h3 className="text-base font-semibold text-emerald-300">Start in Month 3, Not After</h3>
-                <p className="mt-1.5 text-sm text-slate-400">
+                <h3 className="text-base font-semibold text-emerald-600">Start in Month 3, Not After</h3>
+                <p className="mt-1.5 text-sm" style={{ color: LIGHT_THEME.textSecondary }}>
                   Job search takes longer than you think. Start building your portfolio and applying in Month 3 while you're still learning.
                   By the time you finish, you'll have 20+ applications in flight, not starting from zero.
                 </p>
@@ -58,11 +58,11 @@ export default function JobSearchKit({ state }: { state: ProgressState }) {
             const items = roadmap.jobKit.filter(j => j.category === cat)
             return (
               <Card key={cat} className="h-full">
-                <div className={`mx-6 mt-6 flex items-center gap-2.5`}>
-                  <div className={`flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br ${meta.color} text-white shadow`}>
-                    <meta.icon className="h-4 w-4" />
+                <div className="mx-6 mt-5 flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg text-white shadow" style={{ backgroundColor: meta.color }}>
+                    <meta.Icon className="h-4 w-4" />
                   </div>
-                  <h3 className="text-sm font-semibold text-white">{meta.label}</h3>
+                  <h3 className="text-sm font-semibold" style={{ color: LIGHT_THEME.textPrimary }}>{meta.label}</h3>
                 </div>
                 <CardBody>
                   <ul className="space-y-2">
@@ -70,9 +70,10 @@ export default function JobSearchKit({ state }: { state: ProgressState }) {
                       const checked = state.checked[item.id]
                       return (
                         <li key={item.id}>
-                          <label className={`flex items-start gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-all ${checked ? 'bg-white/[0.01]' : 'bg-white/[0.03] hover:bg-white/[0.05]'}`}>
-                            {checked ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-emerald-400" /> : <Circle className="h-4 w-4 mt-0.5 shrink-0 text-slate-600" />}
-                            <span className={`text-sm ${checked ? 'text-slate-500 line-through' : 'text-slate-300'}`}>{item.label}</span>
+                          <label className={`flex items-start gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-all ${checked ? '' : 'hover:bg-gray-50'}`}
+                            style={{ backgroundColor: checked ? LIGHT_THEME.bgSubtle : 'transparent' }}>
+                            {checked ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-coral" /> : <Circle className="h-4 w-4 mt-0.5 shrink-0 text-gray-300" />}
+                            <span className={`text-sm ${checked ? 'line-through' : ''}`} style={{ color: checked ? LIGHT_THEME.textMuted : LIGHT_THEME.textPrimary }}>{item.label}</span>
                           </label>
                         </li>
                       )
@@ -87,13 +88,13 @@ export default function JobSearchKit({ state }: { state: ProgressState }) {
         <motion.div initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} className="mt-8">
           <Card>
             <CardBody>
-              <h3 className="text-sm font-semibold text-white mb-3">Target Roles</h3>
+              <h3 className="text-sm font-semibold mb-3" style={{ color: LIGHT_THEME.textPrimary }}>Target Roles</h3>
               <div className="flex flex-wrap gap-2">
                 {['Cloud Engineer', 'Platform Engineer', 'Cloud Data Architect', 'Solutions Architect', 'DevOps Engineer'].map(role => (
-                  <span key={role} className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-xs text-slate-300">{role}</span>
+                  <span key={role} className="rounded-lg border bg-white px-3 py-1.5 text-xs" style={{ borderColor: LIGHT_THEME.borderLight, color: LIGHT_THEME.textSecondary }}>{role}</span>
                 ))}
               </div>
-              <p className="mt-3 text-xs text-slate-500">at product companies, GCCs, and cloud partners/consultancies.</p>
+              <p className="mt-3 text-xs" style={{ color: LIGHT_THEME.textMuted }}>at product companies, GCCs, and cloud partners/consultancies.</p>
             </CardBody>
           </Card>
         </motion.div>

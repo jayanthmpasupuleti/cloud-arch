@@ -12,9 +12,9 @@ export function GlobalProgress({ state }: { state: ProgressState }) {
   const pct = total === 0 ? 0 : Math.round((done / total) * 100)
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-40 h-1 bg-white/[0.04]" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Overall progress">
+    <div className="fixed top-0 left-0 right-0 z-40 h-1 bg-gray-100" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Overall progress">
       <div
-        className="h-full bg-gradient-to-r from-blue-500 via-violet-500 to-emerald-500 transition-all duration-700 ease-out"
+        className="h-full bg-coral transition-all duration-700 ease-out"
         style={{ width: `${pct}%` }}
       />
     </div>

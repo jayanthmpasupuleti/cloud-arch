@@ -3,20 +3,31 @@
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --color-bg-primary: #FFF5ED;
+  --color-bg-surface: #FFFFFF;
+  --color-bg-subtle: #FFF0E5;
+  --color-coral: #FF6B6B;
+  --color-coral-light: #FFE0E0;
+  --color-coral-dark: #E85555;
+  --color-text-primary: #2D2D2D;
+  --color-text-secondary: #6B6B6B;
+  --color-text-muted: #9E9E9E;
+  --color-border: #F0E0D0;
+  --color-border-light: #FAE8DD;
 }
 
-/* Light mode */
-html.light {
-  color-scheme: light;
+/* Dark mode */
+html.dark {
+  color-scheme: dark;
 }
 
-html.light body {
-  background: #f8fafc;
-  color: #1e293b;
+html.dark body {
+  background: #0F172A;
+  color: #F1F5F9;
 }
 
-html.light .bg-\[\#060918\] {
-  background-color: #f8fafc;
+html.dark .bg-bg-primary {
+  background-color: #0F172A;
 }
 
 /* Base */
@@ -28,18 +39,28 @@ body {
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+
+html.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); }
+html.dark ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
 /* Selection */
 ::selection {
-  background: rgba(59,130,246,0.3);
-  color: white;
+  background: rgba(255, 107, 107, 0.25);
+  color: #2D2D2D;
+}
+
+html.dark ::selection {
+  background: rgba(255, 107, 107, 0.35);
+  color: #F1F5F9;
 }
 
 /* Animations */
@@ -66,9 +87,6 @@ body {
   body { background: white; color: black; }
   section { break-inside: avoid; padding: 1rem 0; }
   h1, h2, h3 { color: black; }
-  .bg-\[\#060918\] { background: white !important; }
-  .text-white, .text-slate-200, .text-slate-300, .text-slate-400 { color: black !important; }
-  .border-white, .border-white\/10 { border-color: #e5e7eb !important; }
 }
 
 /* Reduced motion */
