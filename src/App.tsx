@@ -110,6 +110,9 @@ export default function App() {
           onLogin={login}
           onRegister={register}
           onUpdateProfile={updateUserProfile}
+          isCloudActive={store.isCloudActive}
+          syncStatus={store.syncStatus}
+          onRefreshCloud={store.refreshFromCloud}
         />
       )}
 

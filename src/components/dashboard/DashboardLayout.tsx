@@ -18,6 +18,9 @@ import {
   Menu,
   X,
   Home,
+  Cloud,
+  Database,
+  LogOut,
 } from 'lucide-react'
 import type { DashboardTab } from '../../types/learning'
 import KanbanStudio from './KanbanStudio'
@@ -72,6 +75,10 @@ export default function DashboardLayout({
     users,
     userData,
     stats,
+    isCloudActive,
+    syncStatus,
+    refreshFromCloud,
+    signOutSupabase,
     switchUser,
     login,
     register,
@@ -285,6 +292,32 @@ export default function DashboardLayout({
               {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
 
+            {/* Supabase Cloud Sync Status Pill */}
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition cursor-pointer',
+                isCloudActive
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
+                  : 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'
+              )}
+              title={isCloudActive ? 'Supabase Database Synced - Click to manage' : 'Local Mode - Click to connect Supabase'}
+            >
+              {isCloudActive ? (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <Cloud className="h-3.5 w-3.5" />
+                  <span className="hidden xl:inline">{syncStatus === 'syncing' ? 'Syncing...' : 'Cloud Synced'}</span>
+                </>
+              ) : (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  <Database className="h-3.5 w-3.5" />
+                  <span className="hidden xl:inline">Local Mode</span>
+                </>
+              )}
+            </button>
+
             {/* Profile Avatar / Trigger */}
             <div className="relative">
               <button
@@ -300,12 +333,16 @@ export default function DashboardLayout({
 
               {userDropdownOpen && (
                 <div
-                  className="absolute right-0 mt-2 w-52 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-800 dark:bg-slate-900 z-50 text-xs"
+                  className="absolute right-0 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-800 dark:bg-slate-900 z-50 text-xs"
                   onClick={() => setUserDropdownOpen(false)}
                 >
                   <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800">
                     <p className="font-bold text-slate-900 dark:text-white">{currentUser.name}</p>
                     <p className="text-[10px] text-slate-400 truncate">{currentUser.email}</p>
+                    <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
+                      <span className={cn('h-1.5 w-1.5 rounded-full', isCloudActive ? 'bg-emerald-500' : 'bg-amber-500')} />
+                      <span>{isCloudActive ? 'Supabase Cloud Synced' : 'Local Storage Mode'}</span>
+                    </div>
                   </div>
                   <button
                     onClick={() => setShowAuthModal(true)}
@@ -313,6 +350,22 @@ export default function DashboardLayout({
                   >
                     <User className="h-4 w-4" /> Learner Profile & Switch
                   </button>
+                  <button
+                    onClick={() => setShowAuthModal(true)}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    <Cloud className="h-4 w-4 text-coral" /> Supabase & Cloud DB
+                  </button>
+                  {isCloudActive && (
+                    <button
+                      onClick={() => {
+                        signOutSupabase()
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                    >
+                      <LogOut className="h-4 w-4" /> Sign Out Supabase
+                    </button>
+                  )}
                   <button
                     onClick={onReturnToLanding}
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -415,6 +468,9 @@ export default function DashboardLayout({
           onLogin={login}
           onRegister={register}
           onUpdateProfile={updateUserProfile}
+          isCloudActive={isCloudActive}
+          syncStatus={syncStatus}
+          onRefreshCloud={refreshFromCloud}
         />
       )}
 

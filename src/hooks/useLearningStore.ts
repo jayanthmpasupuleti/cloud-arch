@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import type { User, Session } from '@supabase/supabase-js'
 import { roadmap } from '../data/roadmap'
 import type {
   UserProfile,
@@ -8,6 +9,33 @@ import type {
   UserDataStore,
   SubTask,
 } from '../types/learning'
+import {
+  isSupabaseConfigured,
+  getSupabaseClient,
+} from '../lib/supabase'
+import {
+  getSession,
+  subscribeToAuthChanges,
+  signOutUser,
+} from '../lib/supabaseAuth'
+import {
+  fetchSupabaseProfile,
+  upsertSupabaseProfile,
+  fetchSupabaseCards,
+  upsertSupabaseCard,
+  bulkUpsertSupabaseCards,
+  deleteSupabaseCard,
+  clearAllSupabaseCards,
+  fetchSupabaseRoadmapProgress,
+  setSupabaseRoadmapItem,
+  fetchSupabaseCertifications,
+  upsertSupabaseCert,
+  fetchSupabaseNotes,
+  upsertSupabaseNote,
+  deleteSupabaseNote,
+  mapRowToCard,
+} from '../lib/supabaseDb'
+import type { KanbanCardRow } from '../types/supabase'
 
 const USERS_STORAGE_KEY = 'cloud_arch_users_v2'
 const ACTIVE_USER_KEY = 'cloud_arch_active_user_v2'
@@ -21,7 +49,7 @@ const DEFAULT_USERS: UserProfile[] = [
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
     role: 'Senior Data Engineer',
     targetRole: 'Lead Cloud Solutions Architect',
-    startDate: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Started 14 days ago (Week 3)
+    startDate: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     bio: 'Bridging big data engineering and multi-cloud architectural resilience.',
     createdAt: new Date().toISOString(),
   },
@@ -32,7 +60,7 @@ const DEFAULT_USERS: UserProfile[] = [
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
     role: 'Backend Engineer',
     targetRole: 'Cloud Infrastructure Architect',
-    startDate: new Date().toISOString().split('T')[0], // Started today
+    startDate: new Date().toISOString().split('T')[0],
     bio: 'Mastering GCP, AWS, and enterprise Kubernetes.',
     createdAt: new Date().toISOString(),
   },
@@ -81,11 +109,10 @@ export const COLUMN_DEFINITIONS = [
   },
 ]
 
-function generateSeedCards(): KanbanCard[] {
+export function generateSeedCards(): KanbanCard[] {
   const cards: KanbanCard[] = []
   const now = new Date().toISOString()
 
-  // Week 1 completed items
   cards.push({
     id: 'seed-1',
     title: 'Terraform CLI setup & GCP Provider Authentication',
@@ -240,8 +267,17 @@ function getDefaultUserData(user: UserProfile): UserDataStore {
   }
 }
 
+export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error'
+
 export function useLearningStore() {
-  // Load users list
+  // Supabase Auth & State
+  const [supabaseUser, setSupabaseUser] = useState<User | null>(null)
+  const [supabaseSession, setSupabaseSession] = useState<Session | null>(null)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('offline')
+  const [isCloudEnabled, setIsCloudEnabled] = useState<boolean>(() => isSupabaseConfigured())
+  const isCloudActive = Boolean(supabaseUser && isCloudEnabled)
+
+  // Local demo users list
   const [users, setUsers] = useState<UserProfile[]>(() => {
     try {
       const raw = localStorage.getItem(USERS_STORAGE_KEY)
@@ -252,7 +288,7 @@ export function useLearningStore() {
     return DEFAULT_USERS
   })
 
-  // Active user ID
+  // Active user ID (Local demo mode)
   const [activeUserId, setActiveUserId] = useState<string>(() => {
     try {
       const id = localStorage.getItem(ACTIVE_USER_KEY)
@@ -263,12 +299,26 @@ export function useLearningStore() {
     return DEFAULT_USERS[0].id
   })
 
-  // Current active user
-  const currentUser = useMemo(() => {
+  // Current active user object
+  const currentUser = useMemo<UserProfile>(() => {
+    if (supabaseUser) {
+      const meta = supabaseUser.user_metadata || {}
+      return {
+        id: supabaseUser.id,
+        name: meta.name || supabaseUser.email?.split('@')[0] || 'Cloud Learner',
+        email: supabaseUser.email || '',
+        avatar: meta.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(supabaseUser.email || 'cloud')}`,
+        role: meta.role || 'Cloud Engineer Aspirant',
+        targetRole: meta.target_role || 'Lead Cloud Solutions Architect',
+        startDate: meta.start_date || new Date().toISOString().split('T')[0],
+        bio: meta.bio || 'Tracking cloud architecture milestones via Supabase.',
+        createdAt: supabaseUser.created_at || new Date().toISOString(),
+      }
+    }
     return users.find(u => u.id === activeUserId) || users[0] || DEFAULT_USERS[0]
-  }, [users, activeUserId])
+  }, [supabaseUser, users, activeUserId])
 
-  // Current user's data store
+  // Active User Data Store
   const [userData, setUserData] = useState<UserDataStore>(() => {
     try {
       const raw = localStorage.getItem(`${USER_DATA_PREFIX}${activeUserId}`)
@@ -279,51 +329,230 @@ export function useLearningStore() {
     return getDefaultUserData(DEFAULT_USERS[0])
   })
 
-  // Whenever active user changes, reload their store
+  // Track if current update was triggered by realtime subscription to avoid echoing
+  const isRemoteSyncRef = useRef(false)
+
+  // --------------------------------------------------------------------------
+  // Supabase Auth & Session Initialization
+  // --------------------------------------------------------------------------
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(`${USER_DATA_PREFIX}${activeUserId}`)
-      if (raw) {
-        setUserData(JSON.parse(raw))
+    const configured = isSupabaseConfigured()
+    setIsCloudEnabled(configured)
+
+    if (!configured) {
+      setSyncStatus('offline')
+      return
+    }
+
+    setSyncStatus('syncing')
+    getSession().then(session => {
+      if (session?.user) {
+        setSupabaseSession(session)
+        setSupabaseUser(session.user)
       } else {
-        const fresh = getDefaultUserData(currentUser)
-        setUserData(fresh)
-        localStorage.setItem(`${USER_DATA_PREFIX}${activeUserId}`, JSON.stringify(fresh))
+        setSyncStatus('offline')
       }
-      localStorage.setItem(ACTIVE_USER_KEY, activeUserId)
-    } catch (e) {
-      console.error(e)
-    }
-  }, [activeUserId, currentUser])
+    }).catch(err => {
+      console.warn('Supabase getSession failed:', err)
+      setSyncStatus('offline')
+    })
 
-  // Save users when updated
-  useEffect(() => {
+    const unsubscribe = subscribeToAuthChanges((_event, session) => {
+      setSupabaseSession(session)
+      setSupabaseUser(session?.user || null)
+      if (!session) {
+        setSyncStatus('offline')
+      }
+    })
+
+    return () => {
+      if (unsubscribe) unsubscribe()
+    }
+  }, [])
+
+  // --------------------------------------------------------------------------
+  // Fetch / Sync from Supabase when logged in
+  // --------------------------------------------------------------------------
+  const loadCloudUserData = useCallback(async (user: User) => {
+    setSyncStatus('syncing')
     try {
-      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
-    } catch (e) {
-      console.error(e)
-    }
-  }, [users])
+      // 1. Profile
+      const remoteProfile = await fetchSupabaseProfile(user.id)
+      const userProfile: UserProfile = remoteProfile || {
+        id: user.id,
+        name: user.user_metadata?.name || user.email?.split('@')[0] || 'Cloud Learner',
+        email: user.email || '',
+        avatar: user.user_metadata?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user.email || 'cloud')}`,
+        role: user.user_metadata?.role || 'Cloud Engineer Aspirant',
+        targetRole: user.user_metadata?.target_role || 'Lead Cloud Solutions Architect',
+        startDate: user.user_metadata?.start_date || new Date().toISOString().split('T')[0],
+        bio: user.user_metadata?.bio || '',
+        createdAt: user.created_at,
+      }
 
-  // Save active user data whenever it changes
+      // If no remote profile was found, create it in Supabase
+      if (!remoteProfile) {
+        await upsertSupabaseProfile(userProfile)
+      }
+
+      // 2. Kanban Cards
+      let remoteCards = await fetchSupabaseCards(user.id)
+      if (remoteCards === null || remoteCards.length === 0) {
+        // First-time user: seed initial cards in Supabase database
+        const seed = generateSeedCards()
+        await bulkUpsertSupabaseCards(seed, user.id)
+        remoteCards = seed
+      }
+
+      // 3. Roadmap Progress
+      const remoteProgress = await fetchSupabaseRoadmapProgress(user.id)
+
+      // 4. Certifications
+      const remoteCerts = await fetchSupabaseCertifications(user.id)
+
+      // 5. Daily Notes
+      const remoteNotes = await fetchSupabaseNotes(user.id)
+
+      isRemoteSyncRef.current = true
+      setUserData(prev => ({
+        ...prev,
+        user: userProfile,
+        cards: remoteCards || prev.cards,
+        checkedItems: remoteProgress || prev.checkedItems,
+        certStatuses: remoteCerts?.statuses || prev.certStatuses,
+        certTargets: remoteCerts?.targets || prev.certTargets,
+        notes: remoteNotes || prev.notes,
+      }))
+
+      // Cache locally for offline backup
+      try {
+        localStorage.setItem(`${USER_DATA_PREFIX}${user.id}`, JSON.stringify({
+          user: userProfile,
+          cards: remoteCards,
+          checkedItems: remoteProgress || {},
+          certStatuses: remoteCerts?.statuses || {},
+          certTargets: remoteCerts?.targets || {},
+          notes: remoteNotes || [],
+          theme: 'dark',
+        }))
+      } catch (e) {
+        console.warn('Failed to cache Supabase user data locally', e)
+      }
+
+      setSyncStatus('synced')
+    } catch (err) {
+      console.error('Error synchronizing with Supabase:', err)
+      setSyncStatus('error')
+    }
+  }, [])
+
+  useEffect(() => {
+    if (supabaseUser) {
+      loadCloudUserData(supabaseUser)
+    } else {
+      // Local mode: reload local user's data store
+      try {
+        const raw = localStorage.getItem(`${USER_DATA_PREFIX}${activeUserId}`)
+        if (raw) {
+          setUserData(JSON.parse(raw))
+        } else {
+          const fresh = getDefaultUserData(currentUser)
+          setUserData(fresh)
+          localStorage.setItem(`${USER_DATA_PREFIX}${activeUserId}`, JSON.stringify(fresh))
+        }
+      } catch (e) {
+        console.error(e)
+      }
+    }
+  }, [supabaseUser, activeUserId, loadCloudUserData, currentUser])
+
+  // --------------------------------------------------------------------------
+  // Realtime Supabase Subscription for multi-tab / cross-device live sync
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    if (!supabaseUser || !isCloudEnabled) return
+
+    const client = getSupabaseClient()
+    if (!client) return
+
+    const channel = client
+      .channel(`public:kanban_cards:${supabaseUser.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'kanban_cards',
+          filter: `user_id=eq.${supabaseUser.id}`,
+        },
+        payload => {
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const updatedCard = mapRowToCard(payload.new as KanbanCardRow)
+            setUserData(prev => {
+              const exists = prev.cards.some(c => c.id === updatedCard.id)
+              const newCards = exists
+                ? prev.cards.map(c => (c.id === updatedCard.id ? updatedCard : c))
+                : [updatedCard, ...prev.cards]
+              return { ...prev, cards: newCards }
+            })
+          } else if (payload.eventType === 'DELETE') {
+            const deletedId = (payload.old as any).id
+            if (deletedId) {
+              setUserData(prev => ({
+                ...prev,
+                cards: prev.cards.filter(c => c.id !== deletedId),
+              }))
+            }
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      client.removeChannel(channel)
+    }
+  }, [supabaseUser, isCloudEnabled])
+
+  // --------------------------------------------------------------------------
+  // Local persistence helper
+  // --------------------------------------------------------------------------
   const persistUserData = useCallback((updater: (prev: UserDataStore) => UserDataStore) => {
     setUserData(prev => {
       const next = updater(prev)
       try {
-        localStorage.setItem(`${USER_DATA_PREFIX}${next.user.id}`, JSON.stringify(next))
+        const keyId = supabaseUser?.id || next.user.id
+        localStorage.setItem(`${USER_DATA_PREFIX}${keyId}`, JSON.stringify(next))
       } catch (e) {
         console.error(e)
       }
       return next
     })
-  }, [])
+  }, [supabaseUser])
 
-  // --- Auth & User Switching ---
+  // Save users when updated in local mode
+  useEffect(() => {
+    if (!supabaseUser) {
+      try {
+        localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
+      } catch (e) {
+        console.error(e)
+      }
+    }
+  }, [users, supabaseUser])
+
+  // --------------------------------------------------------------------------
+  // Auth Operations
+  // --------------------------------------------------------------------------
   const switchUser = useCallback((userId: string) => {
+    if (supabaseUser) {
+      // If user clicks switch in local demo modal while in Supabase mode, sign out first
+      signOutUser()
+      setSupabaseUser(null)
+    }
     if (users.some(u => u.id === userId)) {
       setActiveUserId(userId)
     }
-  }, [users])
+  }, [users, supabaseUser])
 
   const login = useCallback((email: string, name?: string) => {
     const existing = users.find(u => u.email.toLowerCase() === email.toLowerCase())
@@ -331,7 +560,6 @@ export function useLearningStore() {
       setActiveUserId(existing.id)
       return existing
     }
-    // Auto-create new user if not found
     const newUser: UserProfile = {
       id: `user-${Date.now()}`,
       name: name || email.split('@')[0],
@@ -380,17 +608,40 @@ export function useLearningStore() {
   }, [users])
 
   const updateUserProfile = useCallback((updates: Partial<UserProfile>) => {
-    setUsers(prev => prev.map(u => u.id === activeUserId ? { ...u, ...updates } : u))
-    persistUserData(prev => ({
-      ...prev,
-      user: { ...prev.user, ...updates },
-    }))
-  }, [activeUserId, persistUserData])
+    if (supabaseUser) {
+      persistUserData(prev => {
+        const updated = { ...prev.user, ...updates }
+        upsertSupabaseProfile(updated)
+        return { ...prev, user: updated }
+      })
+    } else {
+      setUsers(prev => prev.map(u => (u.id === activeUserId ? { ...u, ...updates } : u)))
+      persistUserData(prev => ({
+        ...prev,
+        user: { ...prev.user, ...updates },
+      }))
+    }
+  }, [supabaseUser, activeUserId, persistUserData])
 
-  // --- Kanban Card CRUD Operations ---
+  const handleSignOutSupabase = useCallback(async () => {
+    await signOutUser()
+    setSupabaseUser(null)
+    setSupabaseSession(null)
+    setSyncStatus('offline')
+  }, [])
+
+  const refreshFromCloud = useCallback(async () => {
+    if (supabaseUser) {
+      await loadCloudUserData(supabaseUser)
+    }
+  }, [supabaseUser, loadCloudUserData])
+
+  // --------------------------------------------------------------------------
+  // Kanban CRUD Operations
+  // --------------------------------------------------------------------------
   const addCard = useCallback((card: Partial<KanbanCard>): KanbanCard => {
     const newCard: KanbanCard = {
-      id: `card-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: card.id || `card-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       title: card.title || 'Untitled Learning Material',
       description: card.description || '',
       column: card.column || 'todo',
@@ -413,47 +664,76 @@ export function useLearningStore() {
       cards: [newCard, ...prev.cards],
     }))
 
+    if (supabaseUser) {
+      setSyncStatus('syncing')
+      upsertSupabaseCard(newCard, supabaseUser.id).then(() => setSyncStatus('synced'))
+    }
+
     return newCard
-  }, [persistUserData])
+  }, [persistUserData, supabaseUser])
 
   const updateCard = useCallback((cardId: string, updates: Partial<KanbanCard>) => {
-    persistUserData(prev => ({
-      ...prev,
-      cards: prev.cards.map(c => c.id === cardId ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c),
-    }))
-  }, [persistUserData])
+    let cardToSave: KanbanCard | null = null
+
+    persistUserData(prev => {
+      const nextCards = prev.cards.map(c => {
+        if (c.id === cardId) {
+          cardToSave = { ...c, ...updates, updatedAt: new Date().toISOString() }
+          return cardToSave
+        }
+        return c
+      })
+      return { ...prev, cards: nextCards }
+    })
+
+    if (supabaseUser && cardToSave) {
+      setSyncStatus('syncing')
+      upsertSupabaseCard(cardToSave, supabaseUser.id).then(() => setSyncStatus('synced'))
+    }
+  }, [persistUserData, supabaseUser])
 
   const deleteCard = useCallback((cardId: string) => {
     persistUserData(prev => ({
       ...prev,
       cards: prev.cards.filter(c => c.id !== cardId),
     }))
-  }, [persistUserData])
+
+    if (supabaseUser) {
+      setSyncStatus('syncing')
+      deleteSupabaseCard(cardId, supabaseUser.id).then(() => setSyncStatus('synced'))
+    }
+  }, [persistUserData, supabaseUser])
 
   const clearAllCards = useCallback(() => {
     persistUserData(prev => ({
       ...prev,
       cards: [],
     }))
-  }, [persistUserData])
+
+    if (supabaseUser) {
+      setSyncStatus('syncing')
+      clearAllSupabaseCards(supabaseUser.id).then(() => setSyncStatus('synced'))
+    }
+  }, [persistUserData, supabaseUser])
 
   const moveCard = useCallback((cardId: string, targetColumn: ColumnId, targetIndex?: number) => {
+    let movedCard: KanbanCard | null = null
+
     persistUserData(prev => {
       const card = prev.cards.find(c => c.id === cardId)
       if (!card) return prev
 
       const otherCards = prev.cards.filter(c => c.id !== cardId)
-      const updatedCard = {
+      movedCard = {
         ...card,
         column: targetColumn,
         updatedAt: new Date().toISOString(),
       }
 
       if (typeof targetIndex === 'number' && targetIndex >= 0) {
-        // Splice into column position
         const columnCards = otherCards.filter(c => c.column === targetColumn)
         const restCards = otherCards.filter(c => c.column !== targetColumn)
-        columnCards.splice(targetIndex, 0, updatedCard)
+        columnCards.splice(targetIndex, 0, movedCard)
         return {
           ...prev,
           cards: [...restCards, ...columnCards],
@@ -462,24 +742,37 @@ export function useLearningStore() {
 
       return {
         ...prev,
-        cards: [updatedCard, ...otherCards],
+        cards: [movedCard, ...otherCards],
       }
     })
-  }, [persistUserData])
+
+    if (supabaseUser && movedCard) {
+      setSyncStatus('syncing')
+      upsertSupabaseCard(movedCard, supabaseUser.id).then(() => setSyncStatus('synced'))
+    }
+  }, [persistUserData, supabaseUser])
 
   const toggleSubTask = useCallback((cardId: string, subtaskId: string) => {
+    let updatedCard: KanbanCard | null = null
+
     persistUserData(prev => ({
       ...prev,
       cards: prev.cards.map(c => {
         if (c.id !== cardId) return c
-        return {
+        updatedCard = {
           ...c,
-          checklist: c.checklist.map(st => st.id === subtaskId ? { ...st, done: !st.done } : st),
+          checklist: c.checklist.map(st => (st.id === subtaskId ? { ...st, done: !st.done } : st)),
           updatedAt: new Date().toISOString(),
         }
+        return updatedCard
       }),
     }))
-  }, [persistUserData])
+
+    if (supabaseUser && updatedCard) {
+      setSyncStatus('syncing')
+      upsertSupabaseCard(updatedCard, supabaseUser.id).then(() => setSyncStatus('synced'))
+    }
+  }, [persistUserData, supabaseUser])
 
   const addSubTask = useCallback((cardId: string, label: string) => {
     const newSubTask: SubTask = {
@@ -487,41 +780,57 @@ export function useLearningStore() {
       label,
       done: false,
     }
+    let updatedCard: KanbanCard | null = null
+
     persistUserData(prev => ({
       ...prev,
       cards: prev.cards.map(c => {
         if (c.id !== cardId) return c
-        return {
+        updatedCard = {
           ...c,
           checklist: [...c.checklist, newSubTask],
           updatedAt: new Date().toISOString(),
         }
+        return updatedCard
       }),
     }))
-  }, [persistUserData])
+
+    if (supabaseUser && updatedCard) {
+      setSyncStatus('syncing')
+      upsertSupabaseCard(updatedCard, supabaseUser.id).then(() => setSyncStatus('synced'))
+    }
+  }, [persistUserData, supabaseUser])
 
   const removeSubTask = useCallback((cardId: string, subtaskId: string) => {
+    let updatedCard: KanbanCard | null = null
+
     persistUserData(prev => ({
       ...prev,
       cards: prev.cards.map(c => {
         if (c.id !== cardId) return c
-        return {
+        updatedCard = {
           ...c,
           checklist: c.checklist.filter(st => st.id !== subtaskId),
           updatedAt: new Date().toISOString(),
         }
+        return updatedCard
       }),
     }))
-  }, [persistUserData])
 
-  // --- Curriculum & Roadmap Integration ---
+    if (supabaseUser && updatedCard) {
+      setSyncStatus('syncing')
+      upsertSupabaseCard(updatedCard, supabaseUser.id).then(() => setSyncStatus('synced'))
+    }
+  }, [persistUserData, supabaseUser])
+
+  // --------------------------------------------------------------------------
+  // Curriculum & Roadmap Integration
+  // --------------------------------------------------------------------------
   const importRoadmapTaskToBoard = useCallback((itemId: string, targetColumn: ColumnId = 'todo') => {
-    // Find item in roadmap
     for (const phase of roadmap.phases) {
       for (const week of phase.weeksData) {
         const item = week.items.find(i => i.id === itemId)
         if (item) {
-          // Check if already in board
           const existing = userData.cards.find(c => c.id === item.id || c.title === item.label)
           if (existing) {
             moveCard(existing.id, targetColumn)
@@ -574,14 +883,18 @@ export function useLearningStore() {
   }, [userData.cards, addCard, moveCard])
 
   const toggleRoadmapChecked = useCallback((id: string) => {
-    persistUserData(prev => {
-      const nextChecked = { ...prev.checkedItems, [id]: !prev.checkedItems[id] }
-      return {
-        ...prev,
-        checkedItems: nextChecked,
-      }
-    })
-  }, [persistUserData])
+    const nextVal = !userData.checkedItems[id]
+
+    persistUserData(prev => ({
+      ...prev,
+      checkedItems: { ...prev.checkedItems, [id]: nextVal },
+    }))
+
+    if (supabaseUser) {
+      setSyncStatus('syncing')
+      setSupabaseRoadmapItem(supabaseUser.id, id, nextVal).then(() => setSyncStatus('synced'))
+    }
+  }, [userData.checkedItems, persistUserData, supabaseUser])
 
   const updateCert = useCallback((id: string, field: 'status' | 'targetDate', value: string) => {
     persistUserData(prev => {
@@ -590,35 +903,58 @@ export function useLearningStore() {
       }
       return { ...prev, certTargets: { ...prev.certTargets, [id]: value } }
     })
-  }, [persistUserData])
 
-  // --- Daily Notes ---
+    if (supabaseUser) {
+      setSyncStatus('syncing')
+      upsertSupabaseCert(supabaseUser.id, id, {
+        status: field === 'status' ? value : undefined,
+        targetDate: field === 'targetDate' ? value : undefined,
+      }).then(() => setSyncStatus('synced'))
+    }
+  }, [persistUserData, supabaseUser])
+
+  // --------------------------------------------------------------------------
+  // Daily Notes
+  // --------------------------------------------------------------------------
   const addNote = useCallback((note: Omit<DailyNote, 'id'>) => {
     const newNote: DailyNote = {
       id: `note-${Date.now()}`,
       ...note,
     }
+
     persistUserData(prev => ({
       ...prev,
       notes: [newNote, ...prev.notes],
     }))
+
+    if (supabaseUser) {
+      setSyncStatus('syncing')
+      upsertSupabaseNote(newNote, supabaseUser.id).then(() => setSyncStatus('synced'))
+    }
+
     return newNote
-  }, [persistUserData])
+  }, [persistUserData, supabaseUser])
 
   const deleteNote = useCallback((noteId: string) => {
     persistUserData(prev => ({
       ...prev,
       notes: prev.notes.filter(n => n.id !== noteId),
     }))
-  }, [persistUserData])
 
-  // --- Computed Stats ---
+    if (supabaseUser) {
+      setSyncStatus('syncing')
+      deleteSupabaseNote(noteId, supabaseUser.id).then(() => setSyncStatus('synced'))
+    }
+  }, [persistUserData, supabaseUser])
+
+  // --------------------------------------------------------------------------
+  // Computed Stats
+  // --------------------------------------------------------------------------
   const stats = useMemo(() => {
     const start = currentUser.startDate ? new Date(currentUser.startDate) : new Date()
     const diffDays = Math.max(1, Math.min(112, Math.floor((Date.now() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1))
     const currentWeek = Math.max(1, Math.min(16, Math.floor((diffDays - 1) / 7) + 1))
 
-    // Roadmap tasks count
     let totalRoadmapItems = 0
     let doneRoadmapItems = 0
     for (const phase of roadmap.phases) {
@@ -632,7 +968,6 @@ export function useLearningStore() {
       doneRoadmapItems += project.checklist.filter(i => userData.checkedItems[i.id]).length
     }
 
-    // Board counts
     const cardsByColumn: Record<ColumnId, KanbanCard[]> = {
       backlog: [],
       todo: [],
@@ -654,7 +989,6 @@ export function useLearningStore() {
     const inProgressBoardCards = cardsByColumn.inProgress.length
     const reviewBoardCards = cardsByColumn.review.length
 
-    // Overall completion percentage combining roadmap & board items
     const combinedTotal = totalRoadmapItems + totalBoardCards
     const combinedDone = doneRoadmapItems + doneBoardCards
     const progressPct = combinedTotal === 0 ? 0 : Math.round((combinedDone / combinedTotal) * 100)
@@ -673,7 +1007,9 @@ export function useLearningStore() {
     }
   }, [currentUser, userData])
 
-  // --- Export / Import ---
+  // --------------------------------------------------------------------------
+  // Export / Import / Reset
+  // --------------------------------------------------------------------------
   const exportData = useCallback(() => {
     return JSON.stringify(userData, null, 2)
   }, [userData])
@@ -683,24 +1019,39 @@ export function useLearningStore() {
       const parsed = JSON.parse(jsonStr) as UserDataStore
       if (parsed && parsed.user && Array.isArray(parsed.cards)) {
         persistUserData(() => parsed)
+        if (supabaseUser) {
+          bulkUpsertSupabaseCards(parsed.cards, supabaseUser.id)
+        }
         return true
       }
     } catch (e) {
       console.error(e)
     }
     return false
-  }, [persistUserData])
+  }, [persistUserData, supabaseUser])
 
   const resetUserData = useCallback(() => {
     const fresh = getDefaultUserData(currentUser)
     persistUserData(() => fresh)
-  }, [currentUser, persistUserData])
+    if (supabaseUser) {
+      clearAllSupabaseCards(supabaseUser.id).then(() => {
+        bulkUpsertSupabaseCards(fresh.cards, supabaseUser.id)
+      })
+    }
+  }, [currentUser, persistUserData, supabaseUser])
 
   return {
     users,
     currentUser,
     userData,
     stats,
+    supabaseUser,
+    supabaseSession,
+    isCloudActive,
+    isCloudEnabled,
+    syncStatus,
+    refreshFromCloud,
+    signOutSupabase: handleSignOutSupabase,
     switchUser,
     login,
     register,
