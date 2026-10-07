@@ -45,7 +45,7 @@ interface Props {
 const NAV_ITEMS: { id: DashboardTab; label: string; icon: any; badge?: string }[] = [
   { id: 'kanban', label: 'Kanban Studio', icon: LayoutDashboard, badge: 'Active' },
   { id: 'curriculum', label: '16-Wk Curriculum', icon: BookOpen },
-  { id: 'projects', label: 'Projects & Deliv.', icon: Layers },
+  { id: 'projects', label: 'Projects & Deliverables', icon: Layers },
   { id: 'skills', label: 'Skills Radar', icon: TrendingUp },
   { id: 'certs', label: 'Certifications', icon: Award },
   { id: 'journal', label: 'Daily Journal', icon: PenTool },
@@ -79,6 +79,7 @@ export default function DashboardLayout({
     addCard,
     updateCard,
     deleteCard,
+    clearAllCards,
     moveCard,
     toggleSubTask,
     addSubTask,
@@ -333,6 +334,7 @@ export default function DashboardLayout({
               onAddCard={addCard}
               onUpdateCard={updateCard}
               onDeleteCard={deleteCard}
+              onClearAllCards={clearAllCards}
               onToggleSubTask={toggleSubTask}
               onAddSubTask={addSubTask}
               onRemoveSubTask={removeSubTask}
@@ -382,15 +384,14 @@ export default function DashboardLayout({
           )}
 
           {activeTab === 'jobSearch' && (
-            <div className="h-full overflow-y-auto p-6 max-w-6xl mx-auto">
-              <JobSearchKit state={{ checked: userData.checkedItems } as any} />
-            </div>
+            <JobSearchKit
+              state={{ checked: userData.checkedItems }}
+              onToggle={toggleRoadmapChecked}
+            />
           )}
 
           {activeTab === 'resources' && (
-            <div className="h-full overflow-y-auto p-6 max-w-6xl mx-auto">
-              <Resources />
-            </div>
+            <Resources />
           )}
         </main>
       </div>

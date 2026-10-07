@@ -7,9 +7,10 @@ import {
   useSensor,
   useSensors,
   closestCorners,
+  pointerWithin,
   DragOverlay,
+  useDroppable,
   type DragEndEvent,
-  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
 import {
@@ -26,6 +27,7 @@ import {
   Layers,
   ArrowRight,
   BookOpen,
+  Trash2,
 } from 'lucide-react'
 import type { KanbanCard, ColumnId } from '../../types/learning'
 import { COLUMN_DEFINITIONS } from '../../hooks/useLearningStore'
@@ -40,6 +42,7 @@ interface Props {
   onAddCard: (card: Partial<KanbanCard>) => KanbanCard
   onUpdateCard: (cardId: string, updates: Partial<KanbanCard>) => void
   onDeleteCard: (cardId: string) => void
+  onClearAllCards: () => void
   onToggleSubTask: (cardId: string, subtaskId: string) => void
   onAddSubTask: (cardId: string, label: string) => void
   onRemoveSubTask: (cardId: string, subtaskId: string) => void
@@ -53,6 +56,7 @@ export default function KanbanStudio({
   onAddCard,
   onUpdateCard,
   onDeleteCard,
+  onClearAllCards,
   onToggleSubTask,
   onAddSubTask,
   onRemoveSubTask,
@@ -124,31 +128,6 @@ export default function KanbanStudio({
     setActiveCardId(e.active.id as string)
   }
 
-  const handleDragOver = (e: DragOverEvent) => {
-    const { active, over } = e
-    if (!over) return
-
-    const activeId = active.id as string
-    const overId = over.id as string
-
-    // Find columns
-    const activeCard = cards.find(c => c.id === activeId)
-    if (!activeCard) return
-
-    // If over a column container directly
-    const overColumnDef = COLUMN_DEFINITIONS.find(c => c.id === overId)
-    if (overColumnDef && activeCard.column !== overColumnDef.id) {
-      onMoveCard(activeId, overColumnDef.id)
-      return
-    }
-
-    // If over another card
-    const overCard = cards.find(c => c.id === overId)
-    if (overCard && activeCard.column !== overCard.column) {
-      onMoveCard(activeId, overCard.column)
-    }
-  }
-
   const handleDragEnd = (e: DragEndEvent) => {
     const { active, over } = e
     setActiveCardId(null)
@@ -157,20 +136,49 @@ export default function KanbanStudio({
     const activeId = active.id as string
     const overId = over.id as string
 
-    if (activeId === overId) return
-
     const activeCard = cards.find(c => c.id === activeId)
-    const overCard = cards.find(c => c.id === overId)
+    if (!activeCard) return
 
-    if (activeCard && overCard && activeCard.column === overCard.column) {
-      const colCards = columnCardsMap[activeCard.column]
-      const oldIndex = colCards.findIndex(c => c.id === activeId)
-      const newIndex = colCards.findIndex(c => c.id === overId)
-      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-        onMoveCard(activeId, activeCard.column, newIndex)
+    // Case 1: Dropped onto a column container
+    const isOverColumn = COLUMN_DEFINITIONS.some(c => c.id === overId)
+    if (isOverColumn) {
+      const targetCol = overId as ColumnId
+      if (activeCard.column !== targetCol) {
+        onMoveCard(activeId, targetCol)
+      }
+      return
+    }
+
+    // Case 2: Dropped onto another card
+    const overCard = cards.find(c => c.id === overId)
+    if (overCard) {
+      if (activeCard.column !== overCard.column) {
+        // Move from source column to overCard's column at that card's index
+        const targetColCards = columnCardsMap[overCard.column]
+        const targetIndex = targetColCards.findIndex(c => c.id === overId)
+        onMoveCard(activeId, overCard.column, targetIndex >= 0 ? targetIndex : undefined)
+      } else if (activeId !== overId) {
+        // Reordering within the same column
+        const colCards = columnCardsMap[activeCard.column]
+        const oldIndex = colCards.findIndex(c => c.id === activeId)
+        const newIndex = colCards.findIndex(c => c.id === overId)
+        if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+          onMoveCard(activeId, activeCard.column, newIndex)
+        }
       }
     }
   }
+
+  // Custom collision detection: prioritize pointerWithin, fallback to closestCorners
+  const collisionDetectionStrategy = useMemo(() => {
+    return (args: any) => {
+      const pointerCollisions = pointerWithin(args)
+      if (pointerCollisions.length > 0) {
+        return pointerCollisions
+      }
+      return closestCorners(args)
+    }
+  }, [])
 
   const activeDraggedCard = useMemo(() => {
     return activeCardId ? cards.find(c => c.id === activeCardId) : null
@@ -237,6 +245,22 @@ export default function KanbanStudio({
 
         {/* Global Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Clear All Cards Button */}
+          {cards.length > 0 && (
+            <button
+              onClick={() => {
+                if (confirm(`Are you sure you want to delete all ${cards.length} cards from your Kanban board? You can always restore roadmap items from the curriculum catalog.`)) {
+                  onClearAllCards()
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/50 px-3 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-400 dark:hover:bg-rose-950/60"
+              title="Delete all cards currently on the board"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Clear All Cards
+            </button>
+          )}
+
           <button
             onClick={() => setShowRoadmapCatalog(true)}
             className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-coral hover:text-coral dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-coral"
@@ -298,7 +322,7 @@ export default function KanbanStudio({
         </div>
 
         <div className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="hidden sm:inline">Drag cards to update stage</span>
+          <span className="hidden sm:inline">Drag cards to anywhere from anywhere</span>
         </div>
       </div>
 
@@ -306,85 +330,32 @@ export default function KanbanStudio({
       <div className="flex-1 overflow-x-auto p-5">
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCorners}
+          collisionDetection={collisionDetectionStrategy}
           onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
           <div className="flex items-start gap-4 min-w-[1250px] pb-4">
             {COLUMN_DEFINITIONS.map(col => {
               const colCards = columnCardsMap[col.id] || []
               return (
-                <div
+                <DroppableColumn
                   key={col.id}
-                  id={col.id}
-                  className="flex w-72 flex-col rounded-2xl border border-slate-200 bg-slate-100/60 shadow-sm dark:border-slate-800 dark:bg-slate-900/50"
-                >
-                  {/* Column Header */}
-                  <div className="flex items-center justify-between border-b border-slate-200/60 p-3.5 dark:border-slate-800/60">
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: col.color }}
-                      />
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                        {col.title}
-                      </h3>
-                      <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', col.badgeBg, col.badgeText)}>
-                        {colCards.length}
-                      </span>
-                    </div>
-
-                    <button
-                      onClick={() => setNewCardColumn(col.id)}
-                      className="rounded-lg p-1 text-slate-400 transition hover:bg-white hover:text-coral dark:hover:bg-slate-800"
-                      title={`Add card to ${col.title}`}
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                  </div>
-
-                  {/* Droppable Card Stack */}
-                  <SortableContext
-                    id={col.id}
-                    items={colCards.map(c => c.id)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div className="flex-1 space-y-3 p-3 min-h-[350px]">
-                      {colCards.length === 0 ? (
-                        <div className="flex h-32 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200/80 p-4 text-center dark:border-slate-800/80">
-                          <p className="text-xs font-medium text-slate-400 dark:text-slate-500">
-                            Drop cards here
-                          </p>
-                          <button
-                            onClick={() => setNewCardColumn(col.id)}
-                            className="mt-2 text-[11px] font-semibold text-coral hover:underline"
-                          >
-                            + Add Item
-                          </button>
-                        </div>
-                      ) : (
-                        colCards.map(card => (
-                          <SortableCard
-                            key={card.id}
-                            card={card}
-                            onClick={() => setSelectedCard(card)}
-                            onAdvance={() => {
-                              const nextCol: Record<ColumnId, ColumnId> = {
-                                backlog: 'todo',
-                                todo: 'inProgress',
-                                inProgress: 'review',
-                                review: 'done',
-                                done: 'done',
-                              }
-                              onMoveCard(card.id, nextCol[card.column])
-                            }}
-                          />
-                        ))
-                      )}
-                    </div>
-                  </SortableContext>
-                </div>
+                  col={col}
+                  cards={colCards}
+                  onNewCard={colId => setNewCardColumn(colId)}
+                  onCardClick={card => setSelectedCard(card)}
+                  onCardDelete={cardId => onDeleteCard(cardId)}
+                  onCardAdvance={card => {
+                    const nextCol: Record<ColumnId, ColumnId> = {
+                      backlog: 'todo',
+                      todo: 'inProgress',
+                      inProgress: 'review',
+                      review: 'done',
+                      done: 'done',
+                    }
+                    onMoveCard(card.id, nextCol[card.column])
+                  }}
+                />
               )
             })}
           </div>
@@ -392,10 +363,11 @@ export default function KanbanStudio({
           {/* Drag Overlay for smooth preview */}
           <DragOverlay>
             {activeDraggedCard ? (
-              <div className="rotate-2 opacity-90 shadow-2xl">
+              <div className="rotate-2 opacity-95 shadow-2xl">
                 <SortableCard
                   card={activeDraggedCard}
                   onClick={() => {}}
+                  onDelete={() => {}}
                 />
               </div>
             ) : null}
@@ -552,14 +524,107 @@ export default function KanbanStudio({
   )
 }
 
-// Single Sortable Card Component
+// Droppable Column Component
+function DroppableColumn({
+  col,
+  cards,
+  onNewCard,
+  onCardClick,
+  onCardDelete,
+  onCardAdvance,
+}: {
+  col: (typeof COLUMN_DEFINITIONS)[0]
+  cards: KanbanCard[]
+  onNewCard: (colId: ColumnId) => void
+  onCardClick: (card: KanbanCard) => void
+  onCardDelete: (cardId: string) => void
+  onCardAdvance: (card: KanbanCard) => void
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: col.id,
+  })
+
+  return (
+    <div
+      ref={setNodeRef}
+      id={col.id}
+      className={cn(
+        'flex w-72 flex-col rounded-2xl border transition-colors shadow-xs',
+        isOver
+          ? 'border-coral/60 bg-coral/[0.05] dark:border-coral/50 dark:bg-coral/[0.08]'
+          : 'border-slate-200/90 bg-slate-100/70 dark:border-slate-800 dark:bg-slate-900/60'
+      )}
+    >
+      {/* Column Header */}
+      <div className="flex items-center justify-between border-b border-slate-200/70 p-3.5 dark:border-slate-800/80">
+        <div className="flex items-center gap-2">
+          <div
+            className="h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: col.color }}
+          />
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+            {col.title}
+          </h3>
+          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', col.badgeBg, col.badgeText)}>
+            {cards.length}
+          </span>
+        </div>
+
+        <button
+          onClick={() => onNewCard(col.id)}
+          className="rounded-lg p-1 text-slate-400 transition hover:bg-white hover:text-coral dark:hover:bg-slate-800"
+          title={`Add card to ${col.title}`}
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Droppable Card Stack */}
+      <SortableContext
+        id={col.id}
+        items={cards.map(c => c.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        <div className="flex-1 space-y-3 p-3 min-h-[380px]">
+          {cards.length === 0 ? (
+            <div className="flex h-36 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300/80 p-4 text-center dark:border-slate-800">
+              <p className="text-xs font-medium text-slate-400 dark:text-slate-500">
+                Drop cards here
+              </p>
+              <button
+                onClick={() => onNewCard(col.id)}
+                className="mt-2 text-[11px] font-semibold text-coral hover:underline"
+              >
+                + Add Item
+              </button>
+            </div>
+          ) : (
+            cards.map(card => (
+              <SortableCard
+                key={card.id}
+                card={card}
+                onClick={() => onCardClick(card)}
+                onDelete={onCardDelete}
+                onAdvance={() => onCardAdvance(card)}
+              />
+            ))
+          )}
+        </div>
+      </SortableContext>
+    </div>
+  )
+}
+
+// Single Sortable Card Component with High-Contrast Dark & Light Mode
 function SortableCard({
   card,
   onClick,
+  onDelete,
   onAdvance,
 }: {
   card: KanbanCard
   onClick: () => void
+  onDelete: (cardId: string) => void
   onAdvance?: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -579,10 +644,10 @@ function SortableCard({
     <div
       ref={setNodeRef}
       style={style}
-      className="group relative cursor-pointer rounded-xl border border-slate-200/90 bg-white p-3.5 shadow-xs transition-all hover:border-coral/40 hover:shadow-md dark:border-slate-800 dark:bg-slate-850 dark:hover:border-coral/40"
+      className="group relative cursor-pointer rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs transition-all hover:border-coral/50 hover:shadow-md dark:border-slate-700/80 dark:bg-slate-800 dark:hover:border-coral/50"
       onClick={onClick}
     >
-      {/* Top Meta Line: Priority & Phase */}
+      {/* Top Meta Line: Priority, Phase, Delete button & Drag Handle */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5">
           <span
@@ -593,28 +658,42 @@ function SortableCard({
               'bg-blue-500'
             )}
           />
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">
             {card.priority}
           </span>
         </div>
 
         <div className="flex items-center gap-1.5">
           {card.weekNum ? (
-            <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
               W{card.weekNum}
             </span>
           ) : card.isCustom ? (
-            <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+            <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:bg-violet-950 dark:text-violet-300">
               Custom
             </span>
           ) : null}
+
+          {/* Individual Card Delete Option */}
+          <button
+            onClick={e => {
+              e.stopPropagation()
+              if (confirm(`Delete card "${card.title}"?`)) {
+                onDelete(card.id)
+              }
+            }}
+            className="rounded p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition opacity-0 group-hover:opacity-100"
+            title="Delete this card"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
 
           {/* Drag Handle */}
           <div
             {...attributes}
             {...listeners}
             onClick={e => e.stopPropagation()}
-            className="cursor-grab text-slate-300 transition hover:text-slate-600 active:cursor-grabbing dark:text-slate-600 dark:hover:text-slate-300"
+            className="cursor-grab text-slate-400 transition hover:text-slate-600 active:cursor-grabbing dark:text-slate-400 dark:hover:text-slate-200 p-0.5"
             title="Drag card"
           >
             <GripVertical className="h-3.5 w-3.5" />
@@ -622,14 +701,14 @@ function SortableCard({
         </div>
       </div>
 
-      {/* Card Title */}
-      <h4 className="text-xs font-bold leading-snug text-slate-900 line-clamp-2 dark:text-slate-100">
+      {/* Card Title - High Contrast */}
+      <h4 className="text-xs font-bold leading-snug text-slate-900 dark:text-slate-100 line-clamp-2">
         {card.title}
       </h4>
 
-      {/* Description Preview */}
+      {/* Description Preview - High Contrast */}
       {card.description && (
-        <p className="mt-1 text-[11px] text-slate-500 line-clamp-2 dark:text-slate-400">
+        <p className="mt-1.5 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-2">
           {card.description}
         </p>
       )}
@@ -637,14 +716,14 @@ function SortableCard({
       {/* Checklist / Subtask Progress */}
       {totalSubtasks > 0 && (
         <div className="mt-2.5">
-          <div className="flex items-center justify-between text-[10px] font-medium text-slate-400 mb-1">
+          <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500 dark:text-slate-300 mb-1">
             <span className="flex items-center gap-1">
               <CheckCircle2 className="h-3 w-3 text-emerald-500" />
               {completedSubtasks}/{totalSubtasks} steps
             </span>
             <span>{Math.round((completedSubtasks / totalSubtasks) * 100)}%</span>
           </div>
-          <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+          <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
             <div
               className="h-full rounded-full bg-emerald-500"
               style={{ width: `${Math.round((completedSubtasks / totalSubtasks) * 100)}%` }}
@@ -654,17 +733,17 @@ function SortableCard({
       )}
 
       {/* Bottom Footer Meta */}
-      <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 text-[10px] text-slate-400 dark:border-slate-800">
+      <div className="mt-3 flex items-center justify-between border-t border-slate-100 dark:border-slate-700/60 pt-2 text-[10px] text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
           {card.deliverables && card.deliverables.length > 0 && (
-            <span className="flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-medium" title="Golden Rule Deliverables">
+            <span className="flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-semibold" title="Golden Rule Deliverables">
               <Layers className="h-3 w-3" />
               {card.deliverables.length} deliv.
             </span>
           )}
 
           {card.dueDate && (
-            <span className="flex items-center gap-0.5">
+            <span className="flex items-center gap-0.5 text-slate-500 dark:text-slate-400 font-medium">
               <Calendar className="h-3 w-3" />
               {new Date(card.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
             </span>
@@ -678,7 +757,7 @@ function SortableCard({
               e.stopPropagation()
               onAdvance()
             }}
-            className="flex items-center gap-1 text-[10px] font-semibold text-coral opacity-0 transition group-hover:opacity-100 hover:underline"
+            className="flex items-center gap-1 text-[10px] font-bold text-coral opacity-0 transition group-hover:opacity-100 hover:underline"
             title="Advance to next column"
           >
             Advance <ArrowRight className="h-3 w-3" />

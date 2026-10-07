@@ -21,7 +21,16 @@ export default function ProjectsView({
   onSendProjectToKanban,
 }: Props) {
   const [selectedProjectId, setSelectedProjectId] = useState<string>(roadmap.projects[0].id)
+  const [addedProjectId, setAddedProjectId] = useState<string | null>(null)
   const activeProject = roadmap.projects.find(p => p.id === selectedProjectId) || roadmap.projects[0]
+
+  const handleOpenInKanban = () => {
+    onSendProjectToKanban(activeProject.id, 'inProgress')
+    setAddedProjectId(activeProject.id)
+    setTimeout(() => {
+      setAddedProjectId(null)
+    }, 3000)
+  }
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-6 max-w-7xl mx-auto space-y-6">
@@ -117,12 +126,32 @@ export default function ProjectsView({
                 </h2>
               </div>
 
-              <button
-                onClick={() => onSendProjectToKanban(activeProject.id, 'inProgress')}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-coral px-4 py-2 text-xs font-semibold text-white shadow-md shadow-coral/20 transition hover:bg-coral/90"
-              >
-                <Plus className="h-4 w-4" /> Open as Project in Kanban
-              </button>
+              <div className="flex flex-col items-end gap-1.5">
+                <button
+                  onClick={handleOpenInKanban}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold text-white shadow-md transition-all duration-200',
+                    addedProjectId === activeProject.id
+                      ? 'bg-emerald-600 shadow-emerald-600/30 hover:bg-emerald-700'
+                      : 'bg-coral shadow-coral/20 hover:bg-coral/90'
+                  )}
+                >
+                  {addedProjectId === activeProject.id ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4" /> Added to Kanban (In Progress)
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4" /> Open as Project in Kanban
+                    </>
+                  )}
+                </button>
+                {addedProjectId === activeProject.id && (
+                  <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 animate-fade-in">
+                    ✓ Milestone task created in "In Progress"
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Description */}

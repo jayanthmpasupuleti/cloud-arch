@@ -430,6 +430,13 @@ export function useLearningStore() {
     }))
   }, [persistUserData])
 
+  const clearAllCards = useCallback(() => {
+    persistUserData(prev => ({
+      ...prev,
+      cards: [],
+    }))
+  }, [persistUserData])
+
   const moveCard = useCallback((cardId: string, targetColumn: ColumnId, targetIndex?: number) => {
     persistUserData(prev => {
       const card = prev.cards.find(c => c.id === cardId)
@@ -701,6 +708,7 @@ export function useLearningStore() {
     addCard,
     updateCard,
     deleteCard,
+    clearAllCards,
     moveCard,
     toggleSubTask,
     addSubTask,
