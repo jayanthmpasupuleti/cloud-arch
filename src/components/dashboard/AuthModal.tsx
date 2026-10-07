@@ -47,12 +47,13 @@ interface Props {
   onRefreshCloud?: () => void
 }
 
-const SQL_SCHEMA_SNIPPET = `-- Cloud Architect OS - Supabase Schema
+const SQL_SCHEMA_SNIPPET = `-- Cloud Architect OS - Supabase Database Schema
+-- 1. Profiles Table
 create table if not exists public.profiles (
   id uuid references auth.users(id) on delete cascade primary key,
   name text not null default 'Cloud Architect Aspirant',
   email text not null,
-  avatar text,
+  avatar text default 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
   role text default 'Senior Data / Software Engineer',
   target_role text default 'Lead Cloud Solutions Architect',
   start_date text default to_char(current_date, 'YYYY-MM-DD'),
@@ -61,12 +62,13 @@ create table if not exists public.profiles (
   updated_at timestamptz default now()
 );
 
+-- 2. Kanban Cards Table
 create table if not exists public.kanban_cards (
   id text primary key,
   user_id uuid references auth.users(id) on delete cascade not null,
   title text not null,
   description text default '',
-  column text not null default 'todo',
+  "column" text not null default 'todo',
   priority text not null default 'medium',
   phase_id text default 'custom',
   week_num integer,
@@ -81,12 +83,99 @@ create table if not exists public.kanban_cards (
   updated_at timestamptz default now()
 );
 
+create index if not exists idx_kanban_cards_user on public.kanban_cards(user_id);
+create index if not exists idx_kanban_cards_column on public.kanban_cards(user_id, "column");
+
+-- 3. Roadmap Progress Table
+create table if not exists public.roadmap_progress (
+  user_id uuid references auth.users(id) on delete cascade not null,
+  item_id text not null,
+  completed boolean not null default true,
+  updated_at timestamptz default now(),
+  primary key (user_id, item_id)
+);
+
+-- 4. Certifications Table
+create table if not exists public.certifications (
+  user_id uuid references auth.users(id) on delete cascade not null,
+  cert_id text not null,
+  status text not null default 'planned',
+  target_date text,
+  updated_at timestamptz default now(),
+  primary key (user_id, cert_id)
+);
+
+-- 5. Daily Notes Table
+create table if not exists public.daily_notes (
+  id text primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  date text not null,
+  title text not null,
+  content text default '',
+  tags jsonb default '[]'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- Row Level Security (RLS)
 alter table public.profiles enable row level security;
 alter table public.kanban_cards enable row level security;
+alter table public.roadmap_progress enable row level security;
+alter table public.certifications enable row level security;
+alter table public.daily_notes enable row level security;
 
+-- Policies (Idempotent)
+drop policy if exists "Users can view own profile" on public.profiles;
 create policy "Users can view own profile" on public.profiles for select using (auth.uid() = id);
+drop policy if exists "Users can update own profile" on public.profiles;
 create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
-create policy "Users can manage cards" on public.kanban_cards for all using (auth.uid() = user_id);`
+
+drop policy if exists "Users can manage cards" on public.kanban_cards;
+create policy "Users can manage cards" on public.kanban_cards for all using (auth.uid() = user_id);
+
+drop policy if exists "Users can manage roadmap" on public.roadmap_progress;
+create policy "Users can manage roadmap" on public.roadmap_progress for all using (auth.uid() = user_id);
+
+drop policy if exists "Users can manage certs" on public.certifications;
+create policy "Users can manage certs" on public.certifications for all using (auth.uid() = user_id);
+
+drop policy if exists "Users can manage notes" on public.daily_notes;
+create policy "Users can manage notes" on public.daily_notes for all using (auth.uid() = user_id);
+
+-- Auth Trigger
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, name, email, avatar, role, target_role, start_date)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
+    new.email,
+    coalesce(new.raw_user_meta_data->>'avatar', 'https://api.dicebear.com/7.x/bottts/svg?seed=' || encode(new.email::bytea, 'hex')),
+    coalesce(new.raw_user_meta_data->>'role', 'Cloud Architect Aspirant'),
+    coalesce(new.raw_user_meta_data->>'target_role', 'Lead Cloud Solutions Architect'),
+    coalesce(new.raw_user_meta_data->>'start_date', to_char(current_date, 'YYYY-MM-DD'))
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user();
+
+-- Realtime Setup (Idempotent)
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'kanban_cards') then
+    alter publication supabase_realtime add table public.kanban_cards;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'profiles') then
+    alter publication supabase_realtime add table public.profiles;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'daily_notes') then
+    alter publication supabase_realtime add table public.daily_notes;
+  end if;
+end $$;`
 
 export default function AuthModal({
   isOpen,

@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- Cloud Architect OS - Supabase Database Schema
--- Complete PostgreSQL schema with Row-Level Security (RLS) and triggers
+-- Complete, Idempotent PostgreSQL schema with RLS, triggers & realtime
 -- ==============================================================================
 
 -- 1. Profiles Table (Extends Supabase Auth auth.users)
@@ -23,7 +23,7 @@ create table if not exists public.kanban_cards (
   user_id uuid references auth.users(id) on delete cascade not null,
   title text not null,
   description text default '',
-  column text not null default 'todo', -- 'backlog', 'todo', 'inProgress', 'review', 'done'
+  "column" text not null default 'todo', -- Quoted identifier as "column" is a PostgreSQL keyword
   priority text not null default 'medium', -- 'low', 'medium', 'high'
   phase_id text default 'custom',
   week_num integer,
@@ -40,7 +40,7 @@ create table if not exists public.kanban_cards (
 
 -- Index for speedy user card lookups
 create index if not exists idx_kanban_cards_user on public.kanban_cards(user_id);
-create index if not exists idx_kanban_cards_column on public.kanban_cards(user_id, column);
+create index if not exists idx_kanban_cards_column on public.kanban_cards(user_id, "column");
 
 -- 3. Roadmap Progress Table (stores completed curriculum checkboxes)
 create table if not exists public.roadmap_progress (
@@ -91,78 +91,96 @@ alter table public.certifications enable row level security;
 alter table public.daily_notes enable row level security;
 
 -- Profiles Policies
+drop policy if exists "Users can view own profile" on public.profiles;
 create policy "Users can view own profile"
   on public.profiles for select
   using (auth.uid() = id);
 
+drop policy if exists "Users can insert own profile" on public.profiles;
 create policy "Users can insert own profile"
   on public.profiles for insert
   with check (auth.uid() = id);
 
+drop policy if exists "Users can update own profile" on public.profiles;
 create policy "Users can update own profile"
   on public.profiles for update
   using (auth.uid() = id);
 
 -- Kanban Cards Policies
+drop policy if exists "Users can view own kanban cards" on public.kanban_cards;
 create policy "Users can view own kanban cards"
   on public.kanban_cards for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can insert own kanban cards" on public.kanban_cards;
 create policy "Users can insert own kanban cards"
   on public.kanban_cards for insert
   with check (auth.uid() = user_id);
 
+drop policy if exists "Users can update own kanban cards" on public.kanban_cards;
 create policy "Users can update own kanban cards"
   on public.kanban_cards for update
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can delete own kanban cards" on public.kanban_cards;
 create policy "Users can delete own kanban cards"
   on public.kanban_cards for delete
   using (auth.uid() = user_id);
 
 -- Roadmap Progress Policies
+drop policy if exists "Users can view own roadmap progress" on public.roadmap_progress;
 create policy "Users can view own roadmap progress"
   on public.roadmap_progress for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can insert own roadmap progress" on public.roadmap_progress;
 create policy "Users can insert own roadmap progress"
   on public.roadmap_progress for insert
   with check (auth.uid() = user_id);
 
+drop policy if exists "Users can update own roadmap progress" on public.roadmap_progress;
 create policy "Users can update own roadmap progress"
   on public.roadmap_progress for update
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can delete own roadmap progress" on public.roadmap_progress;
 create policy "Users can delete own roadmap progress"
   on public.roadmap_progress for delete
   using (auth.uid() = user_id);
 
 -- Certifications Policies
+drop policy if exists "Users can view own certs" on public.certifications;
 create policy "Users can view own certs"
   on public.certifications for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can insert own certs" on public.certifications;
 create policy "Users can insert own certs"
   on public.certifications for insert
   with check (auth.uid() = user_id);
 
+drop policy if exists "Users can update own certs" on public.certifications;
 create policy "Users can update own certs"
   on public.certifications for update
   using (auth.uid() = user_id);
 
 -- Daily Notes Policies
+drop policy if exists "Users can view own notes" on public.daily_notes;
 create policy "Users can view own notes"
   on public.daily_notes for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can insert own notes" on public.daily_notes;
 create policy "Users can insert own notes"
   on public.daily_notes for insert
   with check (auth.uid() = user_id);
 
+drop policy if exists "Users can update own notes" on public.daily_notes;
 create policy "Users can update own notes"
   on public.daily_notes for update
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can delete own notes" on public.daily_notes;
 create policy "Users can delete own notes"
   on public.daily_notes for delete
   using (auth.uid() = user_id);
@@ -208,7 +226,29 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Enable Realtime for live cross-device and multi-tab sync
-alter publication supabase_realtime add table public.kanban_cards;
-alter publication supabase_realtime add table public.profiles;
-alter publication supabase_realtime add table public.daily_notes;
+-- ==============================================================================
+-- Enable Realtime for live cross-device and multi-tab sync (Idempotent)
+-- ==============================================================================
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'kanban_cards'
+  ) then
+    alter publication supabase_realtime add table public.kanban_cards;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'profiles'
+  ) then
+    alter publication supabase_realtime add table public.profiles;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'daily_notes'
+  ) then
+    alter publication supabase_realtime add table public.daily_notes;
+  end if;
+end $$;
