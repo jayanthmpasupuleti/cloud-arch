@@ -28,6 +28,10 @@
     </a>
   </div>
 
+  <br />
+
+  <img src="assets/Xnapper-2026-10-08-10.45.08.png" alt="Cloud Architect OS Dashboard Screenshot" width="100%" />
+
 </div>
 
 ---
@@ -216,9 +220,10 @@ cloud-arch/
 
 ## 🏗️ Architecture Decisions
 
-### Why localStorage instead of a backend?
-- Zero infrastructure. Works offline. Perfect for a personal dashboard.
-- The `useProgress` hook is structured so you can swap in Supabase later — the state shape is already normalized and the save/load functions are isolated.
+### Hybrid Cloud Sync & Offline-First Storage
+- **Supabase Cloud + PostgreSQL:** Realtime cross-device sync for Kanban cards, daily journal notes, certifications, and roadmap progress with Row-Level Security (RLS).
+- **Offline / Local Storage Fallback:** Works seamlessly with zero setup or without internet access; automatically falls back to local persistence.
+- **Vite Environment & Runtime Config:** Supports `.env` credentials as well as in-app configuration.
 
 ### Why `roadmap.ts` as the single source of truth?
 - All content (phases, weeks, projects, skills, certs, resources) lives in one typed file.
