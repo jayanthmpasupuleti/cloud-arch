@@ -28,6 +28,7 @@ import {
   ArrowRight,
   BookOpen,
   Trash2,
+  Sparkles,
 } from 'lucide-react'
 import type { KanbanCard, ColumnId } from '../../types/learning'
 import { COLUMN_DEFINITIONS } from '../../hooks/useLearningStore'
@@ -325,6 +326,32 @@ export default function KanbanStudio({
           <span className="hidden sm:inline">Drag cards to anywhere from anywhere</span>
         </div>
       </div>
+
+      {/* Blank Slate Welcome Banner */}
+      {cards.length === 0 && (
+        <div className="mx-5 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed border-coral/30 bg-coral/[0.03] p-4 dark:border-coral/20 dark:bg-coral/[0.06]">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-coral/10 text-coral">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                Fresh Starting Slate · Ready to Begin
+              </h4>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Browse the 16-Week Curriculum or Projects tabs to pull modules into your Kanban board, or click "New Learning Card". Moving your first card to <strong className="text-coral">In Progress</strong> will automatically start your 112-day journey clock!
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowRoadmapCatalog(true)}
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-coral px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-coral/90 transition"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            Pull from Curriculum
+          </button>
+        </div>
+      )}
 
       {/* Kanban Board Drag-and-Drop Columns */}
       <div className="flex-1 overflow-x-auto p-5">

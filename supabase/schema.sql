@@ -11,11 +11,15 @@ create table if not exists public.profiles (
   avatar text default 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
   role text default 'Senior Data / Software Engineer',
   target_role text default 'Lead Cloud Solutions Architect',
+  journey_start_date timestamptz default null, -- Null until user moves first card to inProgress
   start_date text default to_char(current_date, 'YYYY-MM-DD'),
   bio text default 'Bridging scalable data platforms with multi-cloud architecture.',
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+-- Ensure column exists if table was created previously
+alter table public.profiles add column if not exists journey_start_date timestamptz default null;
 
 -- 2. Kanban Cards Table
 create table if not exists public.kanban_cards (
@@ -201,21 +205,35 @@ begin
     avatar,
     role,
     target_role,
+    journey_start_date,
     start_date,
     created_at,
     updated_at
   )
   values (
     new.id,
-    coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
+    coalesce(
+      new.raw_user_meta_data->>'full_name',
+      new.raw_user_meta_data->>'name',
+      split_part(new.email, '@', 1)
+    ),
     new.email,
-    coalesce(new.raw_user_meta_data->>'avatar', 'https://api.dicebear.com/7.x/bottts/svg?seed=' || encode(new.email::bytea, 'hex')),
+    coalesce(
+      new.raw_user_meta_data->>'avatar_url',
+      new.raw_user_meta_data->>'picture',
+      'https://api.dicebear.com/7.x/bottts/svg?seed=' || encode(new.email::bytea, 'hex')
+    ),
     coalesce(new.raw_user_meta_data->>'role', 'Cloud Architect Aspirant'),
     coalesce(new.raw_user_meta_data->>'target_role', 'Lead Cloud Solutions Architect'),
-    coalesce(new.raw_user_meta_data->>'start_date', to_char(current_date, 'YYYY-MM-DD')),
+    null, -- Starts at Day 0! Starts when moving first card to inProgress
+    to_char(current_date, 'YYYY-MM-DD'),
     now(),
     now()
-  );
+  )
+  on conflict (id) do update set
+    name = coalesce(excluded.name, profiles.name),
+    avatar = coalesce(excluded.avatar, profiles.avatar),
+    updated_at = now();
   return new;
 end;
 $$;

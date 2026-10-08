@@ -21,6 +21,7 @@ import {
   Cloud,
   Database,
   LogOut,
+  RotateCcw,
 } from 'lucide-react'
 import type { DashboardTab } from '../../types/learning'
 import KanbanStudio from './KanbanStudio'
@@ -33,6 +34,7 @@ import JobSearchKit from '../sections/JobSearchKit'
 import Resources from '../sections/Resources'
 import NewCardModal from './NewCardModal'
 import AuthModal from './AuthModal'
+import ClearProgressModal from './ClearProgressModal'
 import { cn } from '../../lib/utils'
 
 interface Props {
@@ -68,6 +70,7 @@ export default function DashboardLayout({
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [showNewCardModal, setShowNewCardModal] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
+  const [showClearProgressModal, setShowClearProgressModal] = useState(false)
   const [userDropdownOpen, setUserDropdownOpen] = useState(false)
 
   const {
@@ -79,6 +82,7 @@ export default function DashboardLayout({
     syncStatus,
     refreshFromCloud,
     signOutSupabase,
+    clearAllProgress,
     switchUser,
     login,
     register,
@@ -98,7 +102,6 @@ export default function DashboardLayout({
     addNote,
     deleteNote,
     exportData,
-    resetUserData,
   } = store
 
   const handleExport = () => {
@@ -207,18 +210,20 @@ export default function DashboardLayout({
             Add Learning Card
           </button>
 
-          <div className="flex items-center justify-between pt-2 px-1 text-[11px] text-slate-400">
-            <button onClick={handleExport} className="hover:text-slate-600 dark:hover:text-slate-200">
-              Export JSON
-            </button>
-            <span>·</span>
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
             <button
-              onClick={() => {
-                if (confirm('Reset this learner profile to default seeds?')) resetUserData()
-              }}
-              className="text-rose-500 hover:underline"
+              onClick={handleExport}
+              className="w-full text-center py-1 text-[11px] font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
             >
-              Reset Data
+              Export JSON Backup
+            </button>
+            <button
+              onClick={() => setShowClearProgressModal(true)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-rose-200/80 bg-rose-50/60 py-1.5 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-400 dark:hover:bg-rose-950/60"
+              title="Clear all progress and reset journey timer back to Day 0"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Clear Progress (Reset to Day 0)
             </button>
           </div>
         </div>
@@ -252,8 +257,17 @@ export default function DashboardLayout({
           <div className="flex items-center gap-3">
             {/* Day Counter */}
             <div className="hidden sm:flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-200">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              <span>Day {stats.dayOf112} of 112</span>
+              <span
+                className={cn(
+                  'h-2 w-2 rounded-full',
+                  stats.isJourneyStarted ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                )}
+              />
+              <span>
+                {stats.isJourneyStarted
+                  ? `Day ${stats.dayOf112} of 112 (Week ${stats.currentWeek})`
+                  : 'Day 0 of 112 · Ready to Begin'}
+              </span>
             </div>
 
             {/* Overall Progress Pill */}
@@ -351,17 +365,17 @@ export default function DashboardLayout({
                     <User className="h-4 w-4" /> Learner Profile & Switch
                   </button>
                   <button
-                    onClick={() => setShowAuthModal(true)}
-                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+                    onClick={() => setShowClearProgressModal(true)}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
                   >
-                    <Cloud className="h-4 w-4 text-coral" /> Supabase & Cloud DB
+                    <RotateCcw className="h-4 w-4" /> Reset Progress (Day 0)
                   </button>
                   {isCloudActive && (
                     <button
                       onClick={() => {
                         signOutSupabase()
                       }}
-                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
                     >
                       <LogOut className="h-4 w-4" /> Sign Out Supabase
                     </button>
@@ -471,6 +485,18 @@ export default function DashboardLayout({
           isCloudActive={isCloudActive}
           syncStatus={syncStatus}
           onRefreshCloud={refreshFromCloud}
+        />
+      )}
+
+      {/* Clear All Progress Warning Modal */}
+      {showClearProgressModal && (
+        <ClearProgressModal
+          isOpen={showClearProgressModal}
+          onClose={() => setShowClearProgressModal(false)}
+          onConfirmReset={clearAllProgress}
+          cardsCount={userData.cards.length}
+          checkedCount={stats.doneRoadmapItems}
+          elapsedDays={stats.dayOf112}
         />
       )}
 

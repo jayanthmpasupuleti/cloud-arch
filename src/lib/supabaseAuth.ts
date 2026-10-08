@@ -10,6 +10,34 @@ export interface SignUpParams {
   startDate?: string
 }
 
+export async function signInWithGoogle(): Promise<{ error: string | null }> {
+  const supabase = getSupabaseClient()
+  if (!supabase) {
+    return { error: 'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment.' }
+  }
+
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+      },
+    })
+
+    if (error) {
+      return { error: error.message }
+    }
+
+    return { error: null }
+  } catch (err: any) {
+    return { error: err?.message || 'Google authentication failed to initialize.' }
+  }
+}
+
 export async function signUpWithEmail({
   email,
   password,

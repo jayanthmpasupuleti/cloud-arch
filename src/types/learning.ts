@@ -43,6 +43,7 @@ export interface UserProfile {
   avatar: string
   role: string
   startDate: string
+  journeyStartDate?: string | null
   targetRole: string
   bio?: string
   createdAt: string

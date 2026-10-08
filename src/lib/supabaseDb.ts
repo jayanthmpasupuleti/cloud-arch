@@ -39,6 +39,7 @@ export async function fetchSupabaseProfile(userId: string): Promise<UserProfile 
       role: row.role,
       targetRole: row.target_role,
       startDate: row.start_date,
+      journeyStartDate: row.journey_start_date || null,
       bio: row.bio || '',
       createdAt: row.created_at,
     }
@@ -61,6 +62,7 @@ export async function upsertSupabaseProfile(profile: UserProfile): Promise<boole
       role: profile.role,
       target_role: profile.targetRole,
       start_date: profile.startDate,
+      journey_start_date: profile.journeyStartDate ?? null,
       bio: profile.bio || '',
       updated_at: new Date().toISOString(),
     })
@@ -72,6 +74,29 @@ export async function upsertSupabaseProfile(profile: UserProfile): Promise<boole
     return true
   } catch (e) {
     console.warn('Exception updating profile:', e)
+    return false
+  }
+}
+
+export async function updateSupabaseJourneyStartDate(
+  userId: string,
+  journeyStartDate: string | null
+): Promise<boolean> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return false
+
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        journey_start_date: journeyStartDate,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId)
+
+    return !error
+  } catch (e) {
+    console.warn('Exception updating journey start date:', e)
     return false
   }
 }
@@ -399,6 +424,54 @@ export async function deleteSupabaseNote(noteId: string, userId: string): Promis
     return !error
   } catch (e) {
     console.warn('Exception deleting note:', e)
+    return false
+  }
+}
+
+export async function clearAllSupabaseRoadmapProgress(userId: string): Promise<boolean> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return false
+
+  try {
+    const { error } = await supabase
+      .from('roadmap_progress')
+      .delete()
+      .eq('user_id', userId)
+    return !error
+  } catch (e) {
+    console.warn('Exception clearing roadmap progress:', e)
+    return false
+  }
+}
+
+export async function clearAllSupabaseCertifications(userId: string): Promise<boolean> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return false
+
+  try {
+    const { error } = await supabase
+      .from('certifications')
+      .delete()
+      .eq('user_id', userId)
+    return !error
+  } catch (e) {
+    console.warn('Exception clearing certifications:', e)
+    return false
+  }
+}
+
+export async function clearAllSupabaseNotes(userId: string): Promise<boolean> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return false
+
+  try {
+    const { error } = await supabase
+      .from('daily_notes')
+      .delete()
+      .eq('user_id', userId)
+    return !error
+  } catch (e) {
+    console.warn('Exception clearing notes:', e)
     return false
   }
 }

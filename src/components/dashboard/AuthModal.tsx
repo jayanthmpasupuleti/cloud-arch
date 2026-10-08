@@ -6,27 +6,17 @@ import {
   LogIn,
   CheckCircle2,
   Target,
-  Database,
-  Cloud,
-  Lock,
-  Copy,
-  Check,
   AlertCircle,
   Loader2,
   LogOut,
-  RefreshCw,
-  Code2,
+  Mail,
+  Lock,
 } from 'lucide-react'
 import type { UserProfile } from '../../types/learning'
 import { cn } from '../../lib/utils'
+import { isSupabaseConfigured } from '../../lib/supabase'
 import {
-  getSupabaseCredentials,
-  saveSupabaseCredentials,
-  clearCustomSupabaseCredentials,
-  testSupabaseConnection,
-  isSupabaseConfigured,
-} from '../../lib/supabase'
-import {
+  signInWithGoogle,
   signUpWithEmail,
   signInWithEmail,
   signOutUser,
@@ -47,136 +37,6 @@ interface Props {
   onRefreshCloud?: () => void
 }
 
-const SQL_SCHEMA_SNIPPET = `-- Cloud Architect OS - Supabase Database Schema
--- 1. Profiles Table
-create table if not exists public.profiles (
-  id uuid references auth.users(id) on delete cascade primary key,
-  name text not null default 'Cloud Architect Aspirant',
-  email text not null,
-  avatar text default 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-  role text default 'Senior Data / Software Engineer',
-  target_role text default 'Lead Cloud Solutions Architect',
-  start_date text default to_char(current_date, 'YYYY-MM-DD'),
-  bio text default '',
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
-
--- 2. Kanban Cards Table
-create table if not exists public.kanban_cards (
-  id text primary key,
-  user_id uuid references auth.users(id) on delete cascade not null,
-  title text not null,
-  description text default '',
-  "column" text not null default 'todo',
-  priority text not null default 'medium',
-  phase_id text default 'custom',
-  week_num integer,
-  project_id text,
-  is_custom boolean default true,
-  checklist jsonb default '[]'::jsonb,
-  deliverables jsonb default '[]'::jsonb,
-  tags jsonb default '[]'::jsonb,
-  due_date text,
-  notes text default '',
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
-
-create index if not exists idx_kanban_cards_user on public.kanban_cards(user_id);
-create index if not exists idx_kanban_cards_column on public.kanban_cards(user_id, "column");
-
--- 3. Roadmap Progress Table
-create table if not exists public.roadmap_progress (
-  user_id uuid references auth.users(id) on delete cascade not null,
-  item_id text not null,
-  completed boolean not null default true,
-  updated_at timestamptz default now(),
-  primary key (user_id, item_id)
-);
-
--- 4. Certifications Table
-create table if not exists public.certifications (
-  user_id uuid references auth.users(id) on delete cascade not null,
-  cert_id text not null,
-  status text not null default 'planned',
-  target_date text,
-  updated_at timestamptz default now(),
-  primary key (user_id, cert_id)
-);
-
--- 5. Daily Notes Table
-create table if not exists public.daily_notes (
-  id text primary key,
-  user_id uuid references auth.users(id) on delete cascade not null,
-  date text not null,
-  title text not null,
-  content text default '',
-  tags jsonb default '[]'::jsonb,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
-
--- Row Level Security (RLS)
-alter table public.profiles enable row level security;
-alter table public.kanban_cards enable row level security;
-alter table public.roadmap_progress enable row level security;
-alter table public.certifications enable row level security;
-alter table public.daily_notes enable row level security;
-
--- Policies (Idempotent)
-drop policy if exists "Users can view own profile" on public.profiles;
-create policy "Users can view own profile" on public.profiles for select using (auth.uid() = id);
-drop policy if exists "Users can update own profile" on public.profiles;
-create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
-
-drop policy if exists "Users can manage cards" on public.kanban_cards;
-create policy "Users can manage cards" on public.kanban_cards for all using (auth.uid() = user_id);
-
-drop policy if exists "Users can manage roadmap" on public.roadmap_progress;
-create policy "Users can manage roadmap" on public.roadmap_progress for all using (auth.uid() = user_id);
-
-drop policy if exists "Users can manage certs" on public.certifications;
-create policy "Users can manage certs" on public.certifications for all using (auth.uid() = user_id);
-
-drop policy if exists "Users can manage notes" on public.daily_notes;
-create policy "Users can manage notes" on public.daily_notes for all using (auth.uid() = user_id);
-
--- Auth Trigger
-create or replace function public.handle_new_user()
-returns trigger language plpgsql security definer set search_path = public as $$
-begin
-  insert into public.profiles (id, name, email, avatar, role, target_role, start_date)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
-    new.email,
-    coalesce(new.raw_user_meta_data->>'avatar', 'https://api.dicebear.com/7.x/bottts/svg?seed=' || encode(new.email::bytea, 'hex')),
-    coalesce(new.raw_user_meta_data->>'role', 'Cloud Architect Aspirant'),
-    coalesce(new.raw_user_meta_data->>'target_role', 'Lead Cloud Solutions Architect'),
-    coalesce(new.raw_user_meta_data->>'start_date', to_char(current_date, 'YYYY-MM-DD'))
-  );
-  return new;
-end;
-$$;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user();
-
--- Realtime Setup (Idempotent)
-do $$
-begin
-  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'kanban_cards') then
-    alter publication supabase_realtime add table public.kanban_cards;
-  end if;
-  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'profiles') then
-    alter publication supabase_realtime add table public.profiles;
-  end if;
-  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'daily_notes') then
-    alter publication supabase_realtime add table public.daily_notes;
-  end if;
-end $$;`
-
 export default function AuthModal({
   isOpen,
   onClose,
@@ -188,27 +48,21 @@ export default function AuthModal({
   onUpdateProfile,
   onRefreshCloud,
 }: Props) {
-  const [tab, setTab] = useState<'auth' | 'cloud' | 'edit' | 'demo'>('auth')
+  const [tab, setTab] = useState<'auth' | 'edit' | 'demo'>('auth')
 
   // Auth Mode: 'signin' | 'signup'
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
+  const [showEmailForm, setShowEmailForm] = useState(false)
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
   const [authName, setAuthName] = useState('')
   const [authRole, setAuthRole] = useState('Senior Data Engineer')
   const [authTargetRole, setAuthTargetRole] = useState('Lead Cloud Solutions Architect')
   const [authLoading, setAuthLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [authSuccess, setAuthSuccess] = useState<string | null>(null)
   const [loggedInSupabaseEmail, setLoggedInSupabaseEmail] = useState<string | null>(null)
-
-  // Cloud Config State
-  const [cloudUrl, setCloudUrl] = useState('')
-  const [cloudKey, setCloudKey] = useState('')
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
-  const [testingConnection, setTestingConnection] = useState(false)
-  const [copiedSql, setCopiedSql] = useState(false)
-  const [showSqlPreview, setShowSqlPreview] = useState(false)
 
   // Edit profile state
   const [editName, setEditName] = useState(currentUser.name)
@@ -219,9 +73,6 @@ export default function AuthModal({
   // Load existing credentials on mount
   useEffect(() => {
     if (isOpen) {
-      const creds = getSupabaseCredentials()
-      setCloudUrl(creds.url)
-      setCloudKey(creds.anonKey)
       getSession().then(s => {
         setLoggedInSupabaseEmail(s?.user?.email || null)
       })
@@ -236,23 +87,37 @@ export default function AuthModal({
 
   if (!isOpen) return null
 
-  // Handle Supabase Auth (Sign In / Sign Up)
-  const handleSupabaseAuth = async (e: React.FormEvent) => {
+  // 1. Google OAuth Authentication
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true)
+    setAuthError(null)
+    setAuthSuccess(null)
+
+    const { error } = await signInWithGoogle()
+    if (error) {
+      setGoogleLoading(false)
+      setAuthError(error)
+    }
+    // On success, Supabase initiates an OAuth redirect to Google
+  }
+
+  // 2. Email & Password Auth Fallback
+  const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault()
     setAuthLoading(true)
     setAuthError(null)
     setAuthSuccess(null)
 
     if (!isSupabaseConfigured()) {
-      // Fallback: If Supabase credentials are not set, perform local login/register
+      // Local mode fallback
       if (authMode === 'signup') {
         onRegister(authName || authEmail.split('@')[0], authEmail, authRole, authTargetRole)
       } else {
         onLogin(authEmail, authName || undefined)
       }
-      setAuthSuccess('Logged in via Local Storage (Configure Supabase in Cloud tab to enable cloud DB).')
+      setAuthSuccess('Logged in via Local Storage.')
       setAuthLoading(false)
-      setTimeout(() => onClose(), 1200)
+      setTimeout(() => onClose(), 1000)
       return
     }
 
@@ -265,7 +130,7 @@ export default function AuthModal({
         setAuthSuccess(`Welcome back, ${user.email}! Cloud data synced.`)
         setLoggedInSupabaseEmail(user.email || null)
         if (onRefreshCloud) onRefreshCloud()
-        setTimeout(() => onClose(), 1200)
+        setTimeout(() => onClose(), 1000)
       }
     } else {
       const { user, error } = await signUpWithEmail({
@@ -279,10 +144,10 @@ export default function AuthModal({
       if (error) {
         setAuthError(error)
       } else if (user) {
-        setAuthSuccess('Account created! Your personal Kanban board and roadmap are synced.')
+        setAuthSuccess('Account created! Your personal Kanban board is ready.')
         setLoggedInSupabaseEmail(user.email || null)
         if (onRefreshCloud) onRefreshCloud()
-        setTimeout(() => onClose(), 1500)
+        setTimeout(() => onClose(), 1200)
       }
     }
   }
@@ -292,39 +157,7 @@ export default function AuthModal({
     await signOutUser()
     setLoggedInSupabaseEmail(null)
     setAuthLoading(false)
-    setAuthSuccess('Signed out of Supabase successfully.')
-  }
-
-  // Handle Cloud Config Test & Save
-  const handleSaveCredentials = () => {
-    if (!cloudUrl.trim() || !cloudKey.trim()) {
-      setTestResult({ success: false, message: 'Please enter both URL and Anon Key.' })
-      return
-    }
-    saveSupabaseCredentials(cloudUrl.trim(), cloudKey.trim())
-    setTestResult({ success: true, message: 'Supabase credentials saved successfully!' })
-  }
-
-  const handleTestConnection = async () => {
-    setTestingConnection(true)
-    setTestResult(null)
-    const res = await testSupabaseConnection(cloudUrl, cloudKey)
-    setTestResult(res)
-    setTestingConnection(false)
-  }
-
-  const handleClearCredentials = () => {
-    clearCustomSupabaseCredentials()
-    const creds = getSupabaseCredentials()
-    setCloudUrl(creds.url)
-    setCloudKey(creds.anonKey)
-    setTestResult({ success: true, message: 'Custom credentials cleared.' })
-  }
-
-  const handleCopySql = () => {
-    navigator.clipboard.writeText(SQL_SCHEMA_SNIPPET)
-    setCopiedSql(true)
-    setTimeout(() => setCopiedSql(false), 2000)
+    setAuthSuccess('Signed out successfully.')
   }
 
   // Handle Edit Profile Submit
@@ -358,33 +191,33 @@ export default function AuthModal({
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
-          className="relative z-10 flex max-h-[92vh] w-full max-w-xl flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900 overflow-hidden"
+          className="relative z-10 flex max-h-[92vh] w-full max-w-md flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900 overflow-hidden"
         >
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-slate-100 p-6 dark:border-slate-800">
+          <div className="flex items-center justify-between border-b border-slate-100 p-5 dark:border-slate-800">
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                  Authentication & Supabase Cloud
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Learner Account
                 </h2>
                 {isConfigured ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Supabase Ready
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    Supabase Connected
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                    Local Storage
+                    Local Mode
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Sign in to persist your personal Kanban board, notes, and cert milestones to PostgreSQL.
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Sign in to track and sync your 16-week cloud learning journey.
               </p>
             </div>
             <button
               onClick={onClose}
-              className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               <X className="h-5 w-5" />
             </button>
@@ -394,7 +227,6 @@ export default function AuthModal({
           <div className="flex border-b border-slate-100 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-800/40">
             {[
               { id: 'auth' as const, label: 'Sign In / Register', icon: LogIn },
-              { id: 'cloud' as const, label: 'Supabase Config', icon: Database },
               { id: 'edit' as const, label: 'Edit Profile', icon: Target },
               { id: 'demo' as const, label: 'Demo Switcher', icon: User },
             ].map(t => {
@@ -420,21 +252,23 @@ export default function AuthModal({
 
           {/* Tab Content */}
           <div className="p-6 overflow-y-auto space-y-4">
-            {/* ----------------- TAB: SUPABASE AUTH ----------------- */}
+            {/* ----------------- TAB: AUTH (GOOGLE FIRST) ----------------- */}
             {tab === 'auth' && (
               <div className="space-y-4">
                 {loggedInSupabaseEmail ? (
                   <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 dark:border-emerald-500/30">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-500 font-bold">
-                          ✓
-                        </div>
+                        <img
+                          src={currentUser.avatar}
+                          alt="avatar"
+                          className="h-10 w-10 rounded-full object-cover border border-emerald-500/30"
+                        />
                         <div>
-                          <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                            Authenticated with Supabase
+                          <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                            Signed in as
                           </div>
-                          <div className="text-sm font-bold text-slate-900 dark:text-white">
+                          <div className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[180px]">
                             {loggedInSupabaseEmail}
                           </div>
                         </div>
@@ -451,287 +285,198 @@ export default function AuthModal({
                   </div>
                 ) : (
                   <>
-                    {/* Toggle Mode */}
-                    <div className="flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuthMode('signin')
-                          setAuthError(null)
-                        }}
-                        className={cn(
-                          'flex-1 rounded-lg py-1.5 text-xs font-semibold transition',
-                          authMode === 'signin'
-                            ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white'
-                            : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'
-                        )}
-                      >
-                        Sign In Existing Account
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuthMode('signup')
-                          setAuthError(null)
-                        }}
-                        className={cn(
-                          'flex-1 rounded-lg py-1.5 text-xs font-semibold transition',
-                          authMode === 'signup'
-                            ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white'
-                            : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'
-                        )}
-                      >
-                        Create New Account
-                      </button>
-                    </div>
-
-                    {!isConfigured && (
-                      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-400 flex items-start gap-2">
-                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                        <div>
-                          <span>Supabase credentials not yet configured. Signing in now will save locally. Configure your Supabase project in the </span>
-                          <button
-                            onClick={() => setTab('cloud')}
-                            className="font-bold underline hover:opacity-80"
-                          >
-                            Supabase Config tab
-                          </button>
-                          <span> to sync to the cloud.</span>
-                        </div>
-                      </div>
-                    )}
-
                     {authError && (
                       <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-400 flex items-center gap-2">
                         <AlertCircle className="h-4 w-4 shrink-0" />
-                        {authError}
+                        <span>{authError}</span>
                       </div>
                     )}
 
                     {authSuccess && (
                       <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
                         <CheckCircle2 className="h-4 w-4 shrink-0" />
-                        {authSuccess}
+                        <span>{authSuccess}</span>
                       </div>
                     )}
 
-                    <form onSubmit={handleSupabaseAuth} className="space-y-3.5">
-                      {authMode === 'signup' && (
-                        <div>
-                          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                            Full Name
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={authName}
-                            onChange={e => setAuthName(e.target.value)}
-                            placeholder="e.g. Jayanth Pasupuleti"
-                            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral"
-                          />
+                    {/* DIRECT GOOGLE AUTH BUTTON */}
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={handleGoogleSignIn}
+                        disabled={googleLoading}
+                        className="w-full flex items-center justify-center gap-3 rounded-xl border border-slate-300/80 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-750 disabled:opacity-60"
+                      >
+                        {googleLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-coral" />
+                        ) : (
+                          <svg className="h-4 w-4" viewBox="0 0 24 24">
+                            <path
+                              fill="#4285F4"
+                              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                            />
+                            <path
+                              fill="#34A853"
+                              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                            />
+                            <path
+                              fill="#FBBC05"
+                              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                            />
+                            <path
+                              fill="#EA4335"
+                              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                            />
+                          </svg>
+                        )}
+                        <span>Continue with Google</span>
+                      </button>
+                      <p className="text-[11px] text-center text-slate-400">
+                        One-click login with your Google account.
+                      </p>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="relative my-4 flex items-center justify-center">
+                      <div className="w-full border-t border-slate-200 dark:border-slate-800" />
+                      <span className="absolute bg-white px-3 text-[10px] font-semibold text-slate-400 dark:bg-slate-900">
+                        or email options
+                      </span>
+                    </div>
+
+                    {/* Email Option Toggle */}
+                    {!showEmailForm ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowEmailForm(true)}
+                        className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                      >
+                        <Mail className="h-3.5 w-3.5" />
+                        Sign in or register with Email
+                      </button>
+                    ) : (
+                      <div className="space-y-3 pt-1">
+                        <div className="flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAuthMode('signin')
+                              setAuthError(null)
+                            }}
+                            className={cn(
+                              'flex-1 rounded-lg py-1.5 text-xs font-semibold transition',
+                              authMode === 'signin'
+                                ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white'
+                                : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'
+                            )}
+                          >
+                            Sign In
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAuthMode('signup')
+                              setAuthError(null)
+                            }}
+                            className={cn(
+                              'flex-1 rounded-lg py-1.5 text-xs font-semibold transition',
+                              authMode === 'signup'
+                                ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white'
+                                : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'
+                            )}
+                          >
+                            New Account
+                          </button>
                         </div>
-                      )}
 
-                      <div>
-                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                          Email Address
-                        </label>
-                        <input
-                          type="email"
-                          required
-                          value={authEmail}
-                          onChange={e => setAuthEmail(e.target.value)}
-                          placeholder="learner@company.com"
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                          Password
-                        </label>
-                        <input
-                          type="password"
-                          required
-                          value={authPassword}
-                          onChange={e => setAuthPassword(e.target.value)}
-                          placeholder="••••••••••••"
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral"
-                        />
-                      </div>
-
-                      {authMode === 'signup' && (
-                        <>
-                          <div className="grid grid-cols-2 gap-3">
+                        <form onSubmit={handleEmailAuth} className="space-y-3">
+                          {authMode === 'signup' && (
                             <div>
                               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                                Current Role
+                                Full Name
                               </label>
                               <input
                                 type="text"
-                                value={authRole}
-                                onChange={e => setAuthRole(e.target.value)}
-                                placeholder="Data / Backend Engineer"
+                                required
+                                value={authName}
+                                onChange={e => setAuthName(e.target.value)}
+                                placeholder="Jayanth Pasupuleti"
                                 className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral"
                               />
                             </div>
-                            <div>
-                              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                                Target Role
-                              </label>
-                              <input
-                                type="text"
-                                value={authTargetRole}
-                                onChange={e => setAuthTargetRole(e.target.value)}
-                                placeholder="Cloud Solutions Architect"
-                                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral"
-                              />
-                            </div>
+                          )}
+
+                          <div>
+                            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                              Email Address
+                            </label>
+                            <input
+                              type="email"
+                              required
+                              value={authEmail}
+                              onChange={e => setAuthEmail(e.target.value)}
+                              placeholder="learner@company.com"
+                              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral"
+                            />
                           </div>
-                        </>
-                      )}
 
-                      <div className="pt-2">
-                        <button
-                          type="submit"
-                          disabled={authLoading}
-                          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-coral py-2.5 text-xs font-semibold text-white shadow-md shadow-coral/20 hover:bg-coral/90 disabled:opacity-50"
-                        >
-                          {authLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                          {authMode === 'signin' ? 'Sign In' : 'Create Supabase Account'}
-                        </button>
+                          <div>
+                            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                              <span>Password</span>
+                              <Lock className="h-3 w-3 text-slate-400" />
+                            </label>
+                            <input
+                              type="password"
+                              required
+                              value={authPassword}
+                              onChange={e => setAuthPassword(e.target.value)}
+                              placeholder="••••••••••••"
+                              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral"
+                            />
+                          </div>
+
+                          {authMode === 'signup' && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                                  Current Role
+                                </label>
+                                <input
+                                  type="text"
+                                  value={authRole}
+                                  onChange={e => setAuthRole(e.target.value)}
+                                  placeholder="Data Engineer"
+                                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                                  Target Role
+                                </label>
+                                <input
+                                  type="text"
+                                  value={authTargetRole}
+                                  onChange={e => setAuthTargetRole(e.target.value)}
+                                  placeholder="Cloud Architect"
+                                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          <button
+                            type="submit"
+                            disabled={authLoading}
+                            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-coral py-2 text-xs font-semibold text-white shadow-sm hover:bg-coral/90 disabled:opacity-50"
+                          >
+                            {authLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                            {authMode === 'signin' ? 'Sign In with Email' : 'Create Account'}
+                          </button>
+                        </form>
                       </div>
-                    </form>
+                    )}
                   </>
                 )}
-              </div>
-            )}
-
-            {/* ----------------- TAB: SUPABASE CONFIG & SCHEMA ----------------- */}
-            {tab === 'cloud' && (
-              <div className="space-y-4">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                      <Cloud className="h-4 w-4 text-coral" />
-                      Supabase Project Connection
-                    </span>
-                    <span
-                      className={cn(
-                        'text-[10px] font-bold px-2 py-0.5 rounded-full',
-                        isConfigured
-                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                      )}
-                    >
-                      {isConfigured ? 'Configured' : 'Missing Credentials'}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Enter your Supabase Project URL and anon public key. These can also be configured via <code className="text-coral">.env</code> (<code className="text-xs">VITE_SUPABASE_URL</code> & <code className="text-xs">VITE_SUPABASE_ANON_KEY</code>).
-                  </p>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Supabase Project URL
-                    </label>
-                    <input
-                      type="url"
-                      value={cloudUrl}
-                      onChange={e => setCloudUrl(e.target.value)}
-                      placeholder="https://your-project.supabase.co"
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                      <span>Supabase Anon Public API Key</span>
-                      <Lock className="h-3 w-3 text-slate-400" />
-                    </label>
-                    <input
-                      type="password"
-                      value={cloudKey}
-                      onChange={e => setCloudKey(e.target.value)}
-                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:border-coral font-mono"
-                    />
-                  </div>
-                </div>
-
-                {testResult && (
-                  <div
-                    className={cn(
-                      'rounded-xl border p-3 text-xs flex items-center gap-2',
-                      testResult.success
-                        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                        : 'border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400'
-                    )}
-                  >
-                    {testResult.success ? (
-                      <CheckCircle2 className="h-4 w-4 shrink-0" />
-                    ) : (
-                      <AlertCircle className="h-4 w-4 shrink-0" />
-                    )}
-                    {testResult.message}
-                  </div>
-                )}
-
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <button
-                    onClick={handleSaveCredentials}
-                    className="flex-1 rounded-xl bg-coral px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-coral/90"
-                  >
-                    Save Credentials
-                  </button>
-                  <button
-                    onClick={handleTestConnection}
-                    disabled={testingConnection}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 disabled:opacity-50"
-                  >
-                    {testingConnection ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    Test Connection
-                  </button>
-                  <button
-                    onClick={handleClearCredentials}
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
-                  >
-                    Reset
-                  </button>
-                </div>
-
-                {/* Database Schema Viewer */}
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <Code2 className="h-4 w-4 text-coral" />
-                      Database Schema & Tables (SQL)
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleCopySql}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                      >
-                        {copiedSql ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-                        {copiedSql ? 'Copied!' : 'Copy SQL'}
-                      </button>
-                      <button
-                        onClick={() => setShowSqlPreview(!showSqlPreview)}
-                        className="text-[11px] text-coral hover:underline"
-                      >
-                        {showSqlPreview ? 'Hide SQL' : 'View SQL'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {showSqlPreview && (
-                    <pre className="max-h-48 overflow-y-auto rounded-xl bg-slate-900 p-3 font-mono text-[10px] text-slate-300 border border-slate-800 leading-relaxed">
-                      {SQL_SCHEMA_SNIPPET}
-                    </pre>
-                  )}
-                </div>
               </div>
             )}
 
@@ -779,7 +524,7 @@ export default function AuthModal({
 
                 <div>
                   <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Roadmap Start Date (calculates Day X of 112)
+                    Roadmap Target Start Date
                   </label>
                   <input
                     type="date"

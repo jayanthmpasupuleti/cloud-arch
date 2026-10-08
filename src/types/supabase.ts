@@ -7,6 +7,7 @@ export interface ProfileRow {
   avatar: string
   role: string
   target_role: string
+  journey_start_date: string | null
   start_date: string
   bio?: string
   created_at: string
